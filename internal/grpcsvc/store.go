@@ -149,6 +149,11 @@ func (p *pgStore) List(ctx context.Context, actor, subject string, excludeAction
 	// action <> ALL($3) drops excluded actions across the whole chain; an empty
 	// array keeps every row (x <> ALL('{}') is true). The limit is applied after
 	// exclusion so it bounds the already-filtered set, not the raw window.
+	// A nil slice is sent as NULL, and x <> ALL(NULL) is NULL, which would drop
+	// every row, so it's sent as an empty array instead.
+	if excludeActions == nil {
+		excludeActions = []string{}
+	}
 	rows, err := p.db.Query(ctx,
 		`SELECT `+selectCols+` FROM audit_records
 		 WHERE ($1 = '' OR actor_user_id = $1) AND ($2 = '' OR subject = $2)
