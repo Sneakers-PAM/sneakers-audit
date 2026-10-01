@@ -42,10 +42,9 @@ func RecoveryUnaryInterceptor() grpc.UnaryServerInterceptor {
 }
 
 // RecoveryStreamInterceptor is the streaming counterpart of
-// RecoveryUnaryInterceptor. This server only exposes unary
-// application RPCs today (plus the health service's streaming Watch), so this is
-// defence in depth: any current or future stream handler is covered too. It
-// must run outermost in the stream chain.
+// RecoveryUnaryInterceptor. The audit API is unary (only the health service's
+// Watch streams), so this is defence in depth: any stream handler is covered
+// too. It must run outermost in the stream chain.
 func RecoveryStreamInterceptor() grpc.StreamServerInterceptor {
 	return func(srv any, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) (err error) {
 		defer func() {

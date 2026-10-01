@@ -46,7 +46,7 @@ func Run(ctx context.Context, port string, register func(*grpc.Server), opts ...
 	//     is additive across ServerOptions (v1.81.x appends, no "last wins"),
 	//     and the chain executes first-added-outermost. Prepending our
 	//     ChainUnaryInterceptor before caller opts means recovery runs before
-	//     any caller-supplied interceptor (e.g. ForwardedClaims) and before the
+	//     any caller-supplied interceptor (e.g. an auth interceptor) and before the
 	//     handler, so it catches panics from all of them. The otelgrpc
 	//     StatsHandler still creates the server span first, so the recovery
 	//     interceptor can record the panic on a live span.
@@ -54,8 +54,7 @@ func Run(ctx context.Context, port string, register func(*grpc.Server), opts ...
 	// ChainStreamInterceptor is additive (like the unary chain), so a caller
 	// that later supplies its own stream interceptor composes with recovery
 	// rather than panicking (plain grpc.StreamInterceptor allows only one and
-	// panics on a second). No caller passes a stream interceptor today; this
-	// future-proofs that.
+	// panics on a second).
 	defaults := []grpc.ServerOption{
 		grpc.StatsHandler(otelgrpc.NewServerHandler()),
 		grpc.ChainUnaryInterceptor(RecoveryUnaryInterceptor()),
