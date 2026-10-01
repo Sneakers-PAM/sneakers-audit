@@ -1,0 +1,74 @@
+// Copyright 2026 The Sneakers-PAM Authors
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package sneakers.audit.v1;
+
+option go_package = "github.com/Sneakers-PAM/sneakers-audit/gen/go/sneakers/audit/v1;auditv1";
+
+// An append-only, hash-chained audit trail. Each record links to the previous
+// one by hash, so any tampering (edit, delete, reorder) breaks the chain and is
+// detectable by VerifyChain.
+
+enum Tier {
+  TIER_UNSPECIFIED = 0;
+  TIER_AUDIT = 1;     // security-relevant, tamper-evident
+  TIER_ACTIVITY = 2;  // routine activity
+}
+
+message AuditRecord {
+  uint64 seq = 1;                        // 1-based position in the chain
+  Tier tier = 2;
+  string action = 3;                     // e.g. "secret.reveal"
+  string actor_user_id = 4;
+  string subject = 5;                    // e.g. secret id (+ "#field")
+  string group_id = 6;
+  bool sensitive = 7;
+  map<string, string> attributes = 8;
+  string occurred_at = 9;                // RFC3339
+  string prev_hash = 10;                 // hex sha-256 of the previous record (empty for seq 1)
+  string hash = 11;                      // hex sha-256 of this record's canonical form + prev_hash
+}
+
+message RecordEventRequest {
+  Tier tier = 1;
+  string action = 2;
+  string actor_user_id = 3;
+  string subject = 4;
+  string group_id = 5;
+  bool sensitive = 6;
+  map<string, string> attributes = 7;
+  string occurred_at = 8;                // optional; server stamps now() if empty
+}
+message RecordEventResponse { AuditRecord record = 1; }
+
+message ListRecordsRequest {
+  string actor_user_id = 1;              // optional filter
+  string subject = 2;                    // optional filter
+  uint32 limit = 3;                      // 0 = no limit
+  repeated string exclude_actions = 4;   // records whose action is in this set are omitted (applied before limit)
+}
+message ListRecordsResponse { repeated AuditRecord records = 1; }
+
+// DistinctActions returns the full set of distinct action strings present in the
+// chain, so a UI can offer the complete "hide actions" list (not just the
+// actions in a fetched window).
+message DistinctActionsRequest {
+  string actor_user_id = 1;              // optional filter (distinct actions for one actor)
+}
+message DistinctActionsResponse { repeated string actions = 1; }
+
+message VerifyChainRequest {}
+message VerifyChainResponse {
+  bool valid = 1;
+  uint64 broken_at_seq = 2;              // first bad record when invalid; 0 when valid
+  uint64 length = 3;
+}
+
+service AuditService {
+  rpc RecordEvent(RecordEventRequest) returns (RecordEventResponse);
+  rpc ListRecords(ListRecordsRequest) returns (ListRecordsResponse);
+  rpc DistinctActions(DistinctActionsRequest) returns (DistinctActionsResponse);
+  rpc VerifyChain(VerifyChainRequest) returns (VerifyChainResponse);
+}
