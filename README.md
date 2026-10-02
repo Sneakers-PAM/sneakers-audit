@@ -1,4 +1,4 @@
-# sneakers-audit 🧾
+# Audit Service 🧾
 
 > 🔗 The Sneakers-PAM audit trail: an append-only, hash-chained record of who did what.
 
