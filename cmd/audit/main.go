@@ -66,7 +66,7 @@ func main() {
 	// hash-chained trail is persisted append-only to Postgres.
 	svc := grpcsvc.NewPG(db.Querier())
 	logger.Info().Str("port", cfg.GRPCPort).Msg("starting")
-	if err := server.Run(ctx, cfg.GRPCPort, func(gs *grpc.Server) {
+	if err := server.RunWithLogger(ctx, cfg.GRPCPort, log.NewLogger(serviceName), func(gs *grpc.Server) {
 		grpcsvc.RegisterServer(gs, svc)
 	}); err != nil {
 		logger.Fatal().Err(err).Msg("server exited")
