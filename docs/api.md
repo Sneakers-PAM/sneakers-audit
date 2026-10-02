@@ -7,6 +7,23 @@ generated code from `github.com/Sneakers-PAM/sneakers-audit/gen/go/sneakers/audi
 The server also registers the standard gRPC health service (`grpc.health.v1.Health`) and server
 reflection.
 
+## Callers
+
+Every call must carry the caller's workload identity: its projected Kubernetes ServiceAccount
+token as `authorization: Bearer <token>` (see
+[configuration.md](configuration.md#service-to-service-authentication)). The service verifies it
+and checks the caller against a per-method allow-list (`grpcsvc.CallerPolicy`):
+
+| Caller | Methods | Access |
+|---|---|---|
+| `gateway`, `vault`, `sshbroker`, `identity`, `workflow` | `RecordEvent` | as itself |
+| `gateway` | `ListRecords`, `DistinctActions`, `VerifyChain` | as itself (the audit viewer) |
+
+No or a bad token, or a service account that isn't in `WORKLOAD_ALLOWED_SERVICEACCOUNTS`, gets
+`Unauthenticated`; a listed caller on a method it isn't listed for gets `PermissionDenied`. The
+health service is exempt. A refusal is logged at warn (`call refused`, with the method, caller and
+reason) and never recorded in the chain.
+
 ## RPCs
 
 | RPC | What it does |

@@ -6,24 +6,44 @@ At start the service:
 
 1. reads its configuration (it exits if `DATABASE_DSN` is missing);
 2. starts OpenTelemetry export to `OTEL_EXPORTER_OTLP_ENDPOINT`;
-3. applies the migrations in `MIGRATIONS_DIR` using `MIGRATE_DSN` (or `DATABASE_DSN`);
-4. connects to Postgres and serves gRPC on `GRPC_PORT`.
+3. checks the service-to-service authentication settings: it exits when `WORKLOAD_OIDC_ISSUER` is
+   unset, unless `WORKLOAD_AUTH=disabled`, which it then warns about every 5 minutes;
+4. applies the migrations in `MIGRATIONS_DIR` using `MIGRATE_DSN` (or `DATABASE_DSN`);
+5. connects to Postgres and serves gRPC on `GRPC_PORT`.
 
 Any failure in these steps is logged at fatal level and the process exits non-zero.
 
+## Refused callers
+
+A refused call is logged at warn as `call refused`, with the method, the caller and the reason;
+it is never written to the chain. `Unauthenticated` means no token, a bad one, or a service
+account missing from `WORKLOAD_ALLOWED_SERVICEACCOUNTS`; `PermissionDenied` means the caller is
+known but not allowed on that method. `Unavailable` with `workload verifier unavailable` means no
+JWKS key set has loaded yet: check that the issuer or `WORKLOAD_OIDC_JWKS_URL` is reachable.
+
 ## Health
 
-Use the standard gRPC health check:
+Use the standard gRPC health check. It needs no workload token, so a kubelet `grpc` probe works
+as is, and so does a client that knows the health API without asking the server:
 
 ```bash
-grpcurl -plaintext localhost:9090 grpc.health.v1.Health/Check
+grpc_health_probe -addr localhost:9090
 ```
+
+Server reflection, which grpcurl uses to find a method, is not on any caller's allow-list, so
+with authentication on it is refused. Give grpcurl the protos instead (`-import-path proto
+-proto <file>`), or run locally with `WORKLOAD_AUTH=disabled`, where reflection works as before.
 
 ## Checking the trail
 
 ```bash
-grpcurl -plaintext localhost:9090 sneakers.audit.v1.AuditService/VerifyChain
+token="$(kubectl -n sneakers create token sneakers-gateway --audience sneakers --duration 10m)"
+grpcurl -plaintext -import-path proto -proto sneakers/audit/v1/audit.proto \
+  -H "authorization: Bearer $token" localhost:9090 sneakers.audit.v1.AuditService/VerifyChain
 ```
+
+Run it from a checkout of this repo. Only the gateway may call it, so the call carries a
+short-lived gateway token. Locally, with `WORKLOAD_AUTH=disabled`, leave the header out.
 
 A result with `"valid": false` means a record was changed, removed or reordered outside the
 service. `broken_at_seq` names the first bad record; every record after it fails too, because each
