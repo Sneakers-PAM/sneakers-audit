@@ -16,6 +16,7 @@ import (
 	"github.com/Sneakers-PAM/sneakers-audit/internal/config"
 	"github.com/Sneakers-PAM/sneakers-audit/internal/grpcsvc"
 	"github.com/Sneakers-PAM/sneakers-audit/internal/server"
+	"github.com/Sneakers-PAM/sneakers-audit/internal/workloadauth"
 	"google.golang.org/grpc"
 )
 
@@ -41,6 +42,12 @@ func main() {
 		}
 	}()
 
+	// Service-to-service authentication fails closed: check it before anything
+	// else so a missing issuer stops the boot with the schema untouched.
+	if _, _, err := workloadauth.ServerConfigFromEnv(os.Getenv); err != nil {
+		logger.Fatal().Err(err).Msg("workload auth config")
+	}
+
 	migrationsDir := os.Getenv("MIGRATIONS_DIR")
 	if migrationsDir == "" {
 		migrationsDir = "migrations"
@@ -65,10 +72,17 @@ func main() {
 	// Direct (no-broker) audit: services call RecordEvent over gRPC and the
 	// hash-chained trail is persisted append-only to Postgres.
 	svc := grpcsvc.NewPG(db.Querier())
+	svcLog := log.NewLogger(serviceName)
+	// Every caller is authenticated by its workload identity and checked
+	// against grpcsvc.CallerPolicy.
+	authOpts, err := server.WorkloadAuth(ctx, os.Getenv, grpcsvc.CallerPolicy(), svcLog)
+	if err != nil {
+		logger.Fatal().Err(err).Msg("workload auth")
+	}
 	logger.Info().Str("port", cfg.GRPCPort).Msg("starting")
-	if err := server.RunWithLogger(ctx, cfg.GRPCPort, log.NewLogger(serviceName), func(gs *grpc.Server) {
+	if err := server.RunWithLogger(ctx, cfg.GRPCPort, svcLog, func(gs *grpc.Server) {
 		grpcsvc.RegisterServer(gs, svc)
-	}); err != nil {
+	}, authOpts...); err != nil {
 		logger.Fatal().Err(err).Msg("server exited")
 	}
 }

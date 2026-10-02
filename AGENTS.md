@@ -15,6 +15,10 @@ change to the canonical form or the hash breaks `VerifyChain` for every stored t
 - `cmd/audit/` - the entrypoint: config, migrations, the gRPC server.
 - `internal/chain/` - canonical form and hash chaining.
 - `internal/grpcsvc/` - the service and its Postgres and in-memory stores, with their tests.
+- `internal/workloadauth/` - service-to-service authentication, a byte-for-byte copy of
+  sneakers-vault's package at `SNEAKERS_VAULT_REF` (`proto-refs.env`). Never edit it here: change
+  it in the vault, then copy it and bump the ref (`scripts/workloadauth-check.sh` fails CI
+  otherwise). The allow-list is `internal/grpcsvc/callers.go`; a new RPC needs an entry there.
 - `internal/config/`, `internal/server/` - the env loader and the gRPC server bootstrap.
 - `proto/` - the API; `gen/go/` - the generated Go (committed, checked current in CI).
 - `migrations/` - the Postgres schema, forward only.

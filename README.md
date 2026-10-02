@@ -18,11 +18,14 @@ about actions, never secret material.
 ```bash
 docker run -d --name audit-pg -e POSTGRES_USER=audit -e POSTGRES_DB=audit \
   -e POSTGRES_HOST_AUTH_METHOD=trust -p 127.0.0.1:5432:5432 postgres:17-alpine
-DATABASE_DSN='postgres://audit@localhost:5432/audit?sslmode=disable' go run ./cmd/audit
+WORKLOAD_AUTH=disabled DATABASE_DSN='postgres://audit@localhost:5432/audit?sslmode=disable' \
+  go run ./cmd/audit
 ```
 
-The container trusts local connections without a password, for development only. The service
-applies its migrations at start and listens for gRPC on port 9090.
+The container trusts local connections without a password, and `WORKLOAD_AUTH=disabled` lets any
+local caller in without a workload token, both for development only. In a cluster the service
+accepts only the gateway, vault, SSH broker, identity and workflow, by their ServiceAccount
+tokens. It applies its migrations at start and listens for gRPC on port 9090.
 
 Run the tests, including the Postgres integration test:
 
@@ -37,6 +40,7 @@ task build    # go build ./...
 task test     # go test ./...
 task lint     # tests, gofmt check, golangci-lint and yamllint
 task license  # check the Apache-2.0 headers (golic)
+scripts/workloadauth-check.sh  # internal/workloadauth must match the vault's copy
 ```
 
 ## 📚 Where to look
