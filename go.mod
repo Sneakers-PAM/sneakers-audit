@@ -6,10 +6,10 @@ toolchain go1.26.6
 
 require (
 	github.com/Bugs5382/go-log v1.1.0
-	github.com/Bugs5382/go-otel v1.1.0
+	github.com/Bugs5382/go-otel v1.3.2
 	github.com/Bugs5382/go-postgres v1.1.0
 	github.com/jackc/pgx/v5 v5.10.0
-	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.69.0
+	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.70.0
 	go.opentelemetry.io/otel v1.45.0
 	go.opentelemetry.io/otel/trace v1.45.0
 	google.golang.org/grpc v1.83.2
@@ -32,7 +32,7 @@ require (
 	github.com/mattn/go-isatty v0.0.21 // indirect
 	github.com/rs/zerolog v1.35.1 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
-	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.69.0 // indirect
+	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.70.0 // indirect
 	go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc v1.45.0 // indirect
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace v1.45.0 // indirect
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc v1.45.0 // indirect
