@@ -12,9 +12,9 @@ import (
 	"sync"
 	"time"
 
+	postgres "github.com/Bugs5382/go-postgres"
 	auditv1 "github.com/Sneakers-PAM/sneakers-audit/gen/go/sneakers/audit/v1"
 	"github.com/Sneakers-PAM/sneakers-audit/internal/chain"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"google.golang.org/grpc"
 )
 
@@ -31,7 +31,7 @@ type Server struct {
 func New() *Server { return &Server{store: &memStore{}} }
 
 // NewPG builds a Postgres-backed Server.
-func NewPG(db *pgxpool.Pool) *Server { return &Server{store: &pgStore{db: db}} }
+func NewPG(db postgres.Querier) *Server { return &Server{store: &pgStore{db: db}} }
 
 // Register wires an in-memory audit service into a gRPC server.
 func Register(gs *grpc.Server) { auditv1.RegisterAuditServiceServer(gs, New()) }
