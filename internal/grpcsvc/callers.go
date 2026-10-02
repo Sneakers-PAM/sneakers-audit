@@ -15,11 +15,13 @@ const (
 	CallerSSHBroker = "sshbroker"
 	CallerIdentity  = "identity"
 	CallerWorkflow  = "workflow"
+	CallerMigrate   = "migrate"
 )
 
 // writers record events, each as itself: the actor_user_id they send is the
-// user the event is about, which the audit service stores as given.
-var writers = []string{CallerGateway, CallerVault, CallerSSHBroker, CallerIdentity, CallerWorkflow}
+// user the event is about, which the audit service stores as given. migrate is
+// the migration Job, listed in WORKLOAD_ALLOWED_SERVICEACCOUNTS only while it runs.
+var writers = []string{CallerGateway, CallerVault, CallerSSHBroker, CallerIdentity, CallerWorkflow, CallerMigrate}
 
 // readMethods serve the gateway's audit viewer.
 var readMethods = []string{
@@ -29,7 +31,8 @@ var readMethods = []string{
 }
 
 // CallerPolicy is the audit service's per-method allow-list: RecordEvent for
-// the writers, the reads for the gateway only. Anything else is refused.
+// the writers, the reads for the gateway, and VerifyChain for migrate too, so
+// the Job can check the chain it wrote. Anything else is refused.
 func CallerPolicy() workloadauth.Policy {
 	record := map[string]workloadauth.Access{}
 	for _, c := range writers {
@@ -39,5 +42,6 @@ func CallerPolicy() workloadauth.Policy {
 	for _, m := range readMethods {
 		p[m] = map[string]workloadauth.Access{CallerGateway: workloadauth.Self}
 	}
+	p[auditv1.AuditService_VerifyChain_FullMethodName][CallerMigrate] = workloadauth.Self
 	return p
 }

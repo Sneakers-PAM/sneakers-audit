@@ -18,6 +18,11 @@ and checks the caller against a per-method allow-list (`grpcsvc.CallerPolicy`):
 |---|---|---|
 | `gateway`, `vault`, `sshbroker`, `identity`, `workflow` | `RecordEvent` | as itself |
 | `gateway` | `ListRecords`, `DistinctActions`, `VerifyChain` | as itself (the audit viewer) |
+| `migrate` | `RecordEvent`, `VerifyChain` | as itself (the migration Job) |
+
+Every writer, migrate included, sends `actor_user_id` as the user the event is about, and the
+service stores it as given. `migrate` is in `WORKLOAD_ALLOWED_SERVICEACCOUNTS` only while the
+migration Job runs; the rest of the time its token gets `Unauthenticated`.
 
 No or a bad token, or a service account that isn't in `WORKLOAD_ALLOWED_SERVICEACCOUNTS`, gets
 `Unauthenticated`; a listed caller on a method it isn't listed for gets `PermissionDenied`. The
