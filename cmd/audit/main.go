@@ -12,6 +12,7 @@ import (
 	log "github.com/Bugs5382/go-log"
 	otel "github.com/Bugs5382/go-otel"
 	postgres "github.com/Bugs5382/go-postgres"
+	otelpg "github.com/Bugs5382/go-postgres/otel"
 	"github.com/Sneakers-PAM/sneakers-audit/internal/config"
 	"github.com/Sneakers-PAM/sneakers-audit/internal/grpcsvc"
 	"github.com/Sneakers-PAM/sneakers-audit/internal/server"
@@ -55,18 +56,17 @@ func main() {
 	if err := postgres.Migrate(migrateDSN, migrationsDir); err != nil {
 		logger.Fatal().Err(err).Msg("migrate")
 	}
-	db, err := postgres.New(ctx, cfg.DatabaseDSN)
+	db, err := postgres.New(ctx, cfg.DatabaseDSN, otelpg.WithTracing())
 	if err != nil {
 		logger.Fatal().Err(err).Msg("db connect")
 	}
 	defer db.Close()
-	pool := db.Pool()
 
 	// Direct (no-broker) audit: services call RecordEvent over gRPC and the
 	// hash-chained trail is persisted append-only to Postgres.
-	svc := grpcsvc.NewPG(pool)
+	svc := grpcsvc.NewPG(db.Querier())
 	logger.Info().Str("port", cfg.GRPCPort).Msg("starting")
-	if err := server.Run(ctx, cfg.GRPCPort, func(gs *grpc.Server) {
+	if err := server.RunWithLogger(ctx, cfg.GRPCPort, log.NewLogger(serviceName), func(gs *grpc.Server) {
 		grpcsvc.RegisterServer(gs, svc)
 	}); err != nil {
 		logger.Fatal().Err(err).Msg("server exited")

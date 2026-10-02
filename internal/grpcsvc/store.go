@@ -7,8 +7,8 @@ import (
 	"context"
 	"encoding/json"
 
+	postgres "github.com/Bugs5382/go-postgres"
 	auditv1 "github.com/Sneakers-PAM/sneakers-audit/gen/go/sneakers/audit/v1"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // Store persists the hash-chained audit trail. The record assembly (seq,
@@ -87,7 +87,7 @@ func (m *memStore) DistinctActions(_ context.Context, actor string) ([]string, e
 
 // ---- Postgres store ----------------------------------------------------------
 
-type pgStore struct{ db *pgxpool.Pool }
+type pgStore struct{ db postgres.Querier }
 
 func scanRecord(row interface {
 	Scan(...any) error
