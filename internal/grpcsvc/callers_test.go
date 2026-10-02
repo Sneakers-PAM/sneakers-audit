@@ -23,18 +23,20 @@ import (
 )
 
 // TestCallerPolicyPerMethod pins the allow-list of every audit method:
-// RecordEvent takes the five writers, each as itself; the reads behind the
-// audit viewer take the gateway only.
+// RecordEvent takes the five writers and the migrate Job, each as itself;
+// VerifyChain takes the gateway and migrate; the other reads behind the audit
+// viewer take the gateway only.
 func TestCallerPolicyPerMethod(t *testing.T) {
 	self := workloadauth.Self
 	writers := map[string]workloadauth.Access{
 		CallerGateway: self, CallerVault: self, CallerSSHBroker: self, CallerIdentity: self, CallerWorkflow: self,
+		CallerMigrate: self,
 	}
 	want := map[string]map[string]workloadauth.Access{
 		auditv1.AuditService_RecordEvent_FullMethodName:     writers,
 		auditv1.AuditService_ListRecords_FullMethodName:     {CallerGateway: self},
 		auditv1.AuditService_DistinctActions_FullMethodName: {CallerGateway: self},
-		auditv1.AuditService_VerifyChain_FullMethodName:     {CallerGateway: self},
+		auditv1.AuditService_VerifyChain_FullMethodName:     {CallerGateway: self, CallerMigrate: self},
 	}
 	p := CallerPolicy()
 	desc := auditv1.AuditService_ServiceDesc
@@ -68,13 +70,13 @@ type authFixture struct {
 
 // newAuthFixture serves the audit service behind the real workload-auth
 // interceptors and the real verifier, over a gRPC connection. The verifier's
-// service-account list is the chart's for audit plus mcp, so mcp shows what a
-// listed caller outside the method policy gets.
+// service-account list is the chart's for audit while the migration Job runs,
+// plus mcp, so mcp shows what a listed caller outside the method policy gets.
 func newAuthFixture(t *testing.T) *authFixture {
 	t.Helper()
 	iss := newTestIssuer(t)
 	var allowed []string
-	for _, c := range []string{"gateway", "vault", "sshbroker", "identity", "workflow", "mcp"} {
+	for _, c := range []string{"gateway", "vault", "sshbroker", "identity", "workflow", "migrate", "mcp"} {
 		allowed = append(allowed, authNS+"/sneakers-"+c)
 	}
 	v, err := workloadauth.NewVerifier(workloadauth.Config{Issuer: iss.URL, CAFile: iss.CAFile, AllowedServiceAccounts: allowed}, log.Nop())
@@ -191,6 +193,43 @@ func TestCallerAuth_ReadsAreForTheGatewayOnly(t *testing.T) {
 		wantCode(t, c+" DistinctActions", err, codes.PermissionDenied)
 		_, err = f.client.VerifyChain(ctx, &auditv1.VerifyChainRequest{})
 		wantCode(t, c+" VerifyChain", err, codes.PermissionDenied)
+	}
+}
+
+func TestCallerAuth_MigrateRecordsAndVerifiesOnly(t *testing.T) {
+	f := newAuthFixture(t)
+	m := f.as(t, "migrate")
+	if err := f.record(m); err != nil {
+		t.Fatalf("migrate RecordEvent: %v", err)
+	}
+	if v, err := f.client.VerifyChain(m, &auditv1.VerifyChainRequest{}); err != nil || !v.GetValid() || v.GetLength() != 1 {
+		t.Fatalf("migrate VerifyChain: %v %v", v, err)
+	}
+	_, err := f.client.ListRecords(m, &auditv1.ListRecordsRequest{})
+	wantCode(t, "migrate ListRecords", err, codes.PermissionDenied)
+	_, err = f.client.DistinctActions(m, &auditv1.DistinctActionsRequest{})
+	wantCode(t, "migrate DistinctActions", err, codes.PermissionDenied)
+	if got := f.s.store.(*memStore).records[0].GetActorUserId(); got != "user-made-up" {
+		t.Fatalf("migrate's actor_user_id stored as %q, want it as sent", got)
+	}
+}
+
+func TestCallerPolicy_MigrateOnlyOnRecordAndVerify(t *testing.T) {
+	p := CallerPolicy()
+	allowed := map[string]bool{
+		auditv1.AuditService_RecordEvent_FullMethodName: true,
+		auditv1.AuditService_VerifyChain_FullMethodName: true,
+	}
+	desc := auditv1.AuditService_ServiceDesc
+	for _, md := range desc.Methods {
+		full := "/" + desc.ServiceName + "/" + md.MethodName
+		a, ok := p.Lookup(full, CallerMigrate)
+		switch {
+		case allowed[full] && (!ok || a != workloadauth.Self):
+			t.Errorf("%s: migrate access %v (listed %v), want self", md.MethodName, a, ok)
+		case !allowed[full] && ok:
+			t.Errorf("%s: migrate must not be allowed", md.MethodName)
+		}
 	}
 }
 
