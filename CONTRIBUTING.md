@@ -10,9 +10,9 @@ issues from a template, a branch per issue, Conventional Commits, squash-merged 
 - Build and test: see [README.md](README.md). Set `AUDIT_PG_DSN` to run the Postgres integration
   test; without it that test is skipped.
 - Changing the API: edit `proto/sneakers/audit/v1/audit.proto`, then run `buf generate` (with the
-  `protoc-gen-go` and `protoc-gen-go-grpc` versions pinned in `.github/workflows/checks.yml`) and
-  commit the result under `gen/go`. CI fails if the generated code is stale or the change breaks
-  the API.
+  `protoc-gen-go` and `protoc-gen-go-grpc` versions pinned in
+  `.github/workflows/job-go-lang-ci.yaml`) and commit the result under `gen/go`. CI fails if the
+  generated code is stale or the change breaks the API.
 - Every `.go`, `.proto` and `.sql` file starts with the Apache-2.0 header:
 
   ```
