@@ -2,3 +2,7 @@
 
 # Local design notes (non-tracked).
 .local/
+
+# Local module links (see AGENTS.md); never committed.
+go.work
+go.work.sum

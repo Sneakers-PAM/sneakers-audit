@@ -4,6 +4,10 @@ name: checks
 # status, so the caller job keeps the id `checks`. `edited` reruns it when the
 # PR title or body changes. Build, test, lint and security run in the other
 # workflows (job-go-lang-ci.yaml, job-go-security.yaml and the rest).
+#
+# proto-sync checks on each PR that the callee proto pins in proto-refs.env
+# are on their owners' main, and that go.mod has no replace directive and no
+# owner package at a pseudo-version.
 
 on:
   pull_request:
@@ -26,3 +30,10 @@ jobs:
     with:
       # Public Go module host that appears in go.sum.
       allowed-domains: gonum.org
+  proto-sync:
+    if: github.event_name == 'pull_request' && github.event.pull_request.draft != true
+    permissions:
+      contents: read
+    uses: Sneakers-PAM/.github/.github/workflows/proto-sync.yml@77dd2ac5815c0adb982872341813ada8511a3ab5
+    with:
+      tools-ref: 77dd2ac5815c0adb982872341813ada8511a3ab5

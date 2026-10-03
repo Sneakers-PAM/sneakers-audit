@@ -57,3 +57,11 @@ Follow the logging rules in `CLAUDE.md`. In short:
 - Every commit carries a DCO sign-off (`git commit -s`); the `checks / scrub` job fails without it.
 - No real identifiers anywhere: fixtures use example.org, 192.0.2.0/24, 2001:db8::/32 and invented
   names.
+- `go.mod` holds tagged releases only: no `replace` directive, and no pseudo-version (`@main`,
+  `@<sha>`) of a `github.com/Bugs5382/*` or `github.com/Sneakers-PAM/*` module; the
+  `proto-sync / check` job fails on either. To compile and test against a local package checkout,
+  use a git-ignored `go.work` beside `go.mod` (`go work init . ../go-<pkg>`, which writes
+  `use . ../go-<pkg>`); `go.work` and `go.work.sum` are in `.gitignore`. Here `SNEAKERS_VAULT_REF`
+  pins no protos: it is the sneakers-vault commit `internal/workloadauth/` is copied from, and
+  `SNEAKERS_VAULT_DIR` points `scripts/workloadauth-check.sh` at a local sneakers-vault checkout
+  instead.
