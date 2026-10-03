@@ -61,4 +61,7 @@ Follow the logging rules in `CLAUDE.md`. In short:
   `@<sha>`) of a `github.com/Bugs5382/*` or `github.com/Sneakers-PAM/*` module; the
   `proto-sync / check` job fails on either. To compile and test against a local package checkout,
   use a git-ignored `go.work` beside `go.mod` (`go work init . ../go-<pkg>`, which writes
-  `use . ../go-<pkg>`); `go.work` and `go.work.sum` are in `.gitignore`.
+  `use . ../go-<pkg>`); `go.work` and `go.work.sum` are in `.gitignore`. Here `SNEAKERS_VAULT_REF`
+  pins no protos: it is the sneakers-vault commit `internal/workloadauth/` is copied from, and
+  `SNEAKERS_VAULT_DIR` points `scripts/workloadauth-check.sh` at a local sneakers-vault checkout
+  instead.
