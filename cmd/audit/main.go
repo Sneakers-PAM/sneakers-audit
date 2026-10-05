@@ -15,6 +15,7 @@ import (
 	otelpg "github.com/Bugs5382/go-postgres/otel"
 	"github.com/Sneakers-PAM/sneakers-audit/internal/config"
 	"github.com/Sneakers-PAM/sneakers-audit/internal/grpcsvc"
+	"github.com/Sneakers-PAM/sneakers-audit/internal/health"
 	"github.com/Sneakers-PAM/sneakers-audit/internal/server"
 	"github.com/Sneakers-PAM/sneakers-audit/internal/workloadauth"
 	"google.golang.org/grpc"
@@ -83,7 +84,9 @@ func main() {
 		logger.Fatal().Err(err).Msg("workload auth")
 	}
 	logger.Info().Str("port", cfg.GRPCPort).Msg("starting")
-	if err := server.RunWithLogger(ctx, cfg.GRPCPort, svcLog, func(gs *grpc.Server) {
+	// Readiness follows Postgres: every RPC reads or writes the trail there.
+	checker := health.New(svcLog, health.Postgres(db))
+	if err := server.RunWithHealth(ctx, cfg.GRPCPort, svcLog, checker, func(gs *grpc.Server) {
 		grpcsvc.RegisterServer(gs, svc)
 	}, authOpts...); err != nil {
 		logger.Fatal().Err(err).Msg("server exited")
