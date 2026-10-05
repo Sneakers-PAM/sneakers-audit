@@ -4,14 +4,15 @@ The service implements `sneakers.audit.v1.AuditService`, defined in
 [proto/sneakers/audit/v1/audit.proto](../proto/sneakers/audit/v1/audit.proto). Go clients import the
 generated code from `github.com/Sneakers-PAM/sneakers-audit/gen/go/sneakers/audit/v1`.
 
-The server also registers the standard gRPC health service (`grpc.health.v1.Health`) and server
-reflection.
+The server also registers the standard gRPC health service (`grpc.health.v1.Health`, driven by
+`github.com/Bugs5382/go-buildinfo`) and server reflection.
 
-A health check's answer carries the build in its response headers: `sneakers-version` (the image
-tag, `dev` when unstamped) and `sneakers-commit` (the source commit, `unknown` when neither the
-build nor Go's VCS stamp knows it). It also carries `sneakers-dep-postgres`, the database
-server's version (`SHOW server_version`, first token, at most 64 characters), read once at start;
-the header is left out when that read failed. The gateway's diagnostics read them.
+Every health check's answer carries the build in its response headers: `sneakers-version` (the
+image tag, `dev` when unstamped) and `sneakers-commit` (the source commit, `unknown` when neither
+the build nor Go's VCS stamp knows it). A readiness answer also carries `sneakers-dep-postgres`,
+the database server's version (`SHOW server_version`, first token, at most 64 characters; re-read
+every 5 minutes, `unknown` until the first read succeeds), and `sneakers-depstate-postgres`
+(`ok`, `degraded` or `down`). The gateway's diagnostics read them.
 
 The health check has two services:
 
@@ -21,16 +22,18 @@ The health check has two services:
   answer carries `sneakers-health`, a compact JSON report:
 
   ```json
-  {"status":"down","dependencies":[{"name":"postgres","state":"down","required":true,"error":"refused","checkedAt":"2026-10-05T12:00:05Z","version":"17.11"}]}
+  {"status":"down","ready":false,"dependencies":[{"name":"postgres","state":"down","required":true,"error":"refused","checkedAt":"2026-10-05T12:00:05Z","version":"17.11"}]}
   ```
 
   `status` and each `state` are `ok`, `degraded` (an optional dependency is failing; still
   serving) or `down` (a required one is; not serving). `error` is a class, never the error
-  itself: `timeout`, `refused`, `unavailable`, `unauthenticated` or `error`. `version` is the one
-  in `sneakers-dep-*`, when known.
+  itself: `timeout`, `refused`, `unavailable`, `unauthenticated` or `error` (or go-buildinfo's
+  `connection-refused`, `dns`, `network`, `canceled` or `panic`). `version` is the one in
+  `sneakers-dep-*`.
 - `liveness` answers `SERVING` whenever the process does and never touches a dependency.
 
-Any other service name is `NOT_FOUND`. `Watch` is not supported (`UNIMPLEMENTED`); poll `Check`.
+Any other service name is `NOT_FOUND`. `Watch` streams the serving status of either service as it
+changes.
 
 ## Callers
 

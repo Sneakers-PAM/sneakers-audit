@@ -19,7 +19,8 @@ change to the canonical form or the hash breaks `VerifyChain` for every stored t
   sneakers-vault's package at `SNEAKERS_VAULT_REF` (`proto-refs.env`). Never edit it here: change
   it in the vault, then copy it and bump the ref (`scripts/workloadauth-check.sh` fails CI
   otherwise). The allow-list is `internal/grpcsvc/callers.go`; a new RPC needs an entry there.
-- `internal/config/`, `internal/server/` - the env loader and the gRPC server bootstrap.
+- `internal/config/`, `internal/server/` - the env loader and the gRPC server bootstrap, with the
+  health service and readiness checks from `github.com/Bugs5382/go-buildinfo`.
 - `proto/` - the API; `gen/go/` - the generated Go (committed, checked current in CI).
 - `migrations/` - the Postgres schema, forward only.
 - `docs/` - configuration, API and runbook.
@@ -32,6 +33,9 @@ change to the canonical form or the hash breaks `VerifyChain` for every stored t
 - Lint: `task lint`, plus `buf lint` for the proto.
 - Generated code: `buf generate` with the plugin versions pinned in
   `.github/workflows/job-go-lang-ci.yaml`.
+- Vulnerabilities: `task vuln` runs govulncheck as CI does (`scripts/govulncheck.sh`): any called
+  finding fails unless its ID is in `govulncheck-allow.txt`, which says why and when each entry
+  goes. `scripts/govulncheck_test.sh` checks the filter itself.
 - License headers: `task license` (golic, the Apache-2.0 SPDX header in `.golic.yaml`).
 
 ## Logging
