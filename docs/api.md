@@ -7,6 +7,10 @@ generated code from `github.com/Sneakers-PAM/sneakers-audit/gen/go/sneakers/audi
 The server also registers the standard gRPC health service (`grpc.health.v1.Health`) and server
 reflection.
 
+A health check's answer carries the build in its response headers: `sneakers-version` (the image
+tag, `dev` when unstamped) and `sneakers-commit` (the source commit, `unknown` when neither the
+build nor Go's VCS stamp knows it). The gateway's diagnostics read them.
+
 ## Callers
 
 Every call must carry the caller's workload identity: its projected Kubernetes ServiceAccount
