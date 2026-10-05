@@ -23,14 +23,15 @@ import (
 )
 
 // TestCallerPolicyPerMethod pins the allow-list of every audit method:
-// RecordEvent takes the five writers and the migrate Job, each as itself;
+// RecordEvent takes the five writers, the migrate Job and the appliance, each
+// as itself;
 // VerifyChain takes the gateway and migrate; the other reads behind the audit
 // viewer take the gateway only.
 func TestCallerPolicyPerMethod(t *testing.T) {
 	self := workloadauth.Self
 	writers := map[string]workloadauth.Access{
 		CallerGateway: self, CallerVault: self, CallerSSHBroker: self, CallerIdentity: self, CallerWorkflow: self,
-		CallerMigrate: self,
+		CallerMigrate: self, CallerAppliance: self,
 	}
 	want := map[string]map[string]workloadauth.Access{
 		auditv1.AuditService_RecordEvent_FullMethodName:     writers,
@@ -76,7 +77,7 @@ func newAuthFixture(t *testing.T) *authFixture {
 	t.Helper()
 	iss := newTestIssuer(t)
 	var allowed []string
-	for _, c := range []string{"gateway", "vault", "sshbroker", "identity", "workflow", "migrate", "mcp"} {
+	for _, c := range []string{"gateway", "vault", "sshbroker", "identity", "workflow", "migrate", "appliance", "mcp"} {
 		allowed = append(allowed, authNS+"/sneakers-"+c)
 	}
 	v, err := workloadauth.NewVerifier(workloadauth.Config{Issuer: iss.URL, CAFile: iss.CAFile, AllowedServiceAccounts: allowed}, log.Nop())

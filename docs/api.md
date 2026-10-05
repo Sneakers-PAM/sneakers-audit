@@ -44,10 +44,18 @@ and checks the caller against a per-method allow-list (`grpcsvc.CallerPolicy`):
 | `gateway`, `vault`, `sshbroker`, `identity`, `workflow` | `RecordEvent` | as itself |
 | `gateway` | `ListRecords`, `DistinctActions`, `VerifyChain` | as itself (the audit viewer) |
 | `migrate` | `RecordEvent`, `VerifyChain` | as itself (the migration Job) |
+| `appliance` | `RecordEvent` | as itself, `appliance-admin` events only |
 
 Every writer, migrate included, sends `actor_user_id` as the user the event is about, and the
 service stores it as given. `migrate` is in `WORKLOAD_ALLOWED_SERVICEACCOUNTS` only while the
 migration Job runs; the rest of the time its token gets `Unauthenticated`.
+
+`appliance` is the appliance's controller (the `sneakers-appliance` service account), forwarding
+the box's OS audit entries into the same chain. Its events must carry the attribute
+`actor_type=appliance-admin`, because they are about the box's owners rather than product users;
+any other or missing `actor_type` from `appliance` gets `PermissionDenied`, and so does an
+`actor_type=appliance-admin` event from any other caller. A refused event is never written. Only
+installs that run the appliance list `sneakers-appliance` in `WORKLOAD_ALLOWED_SERVICEACCOUNTS`.
 
 No or a bad token, or a service account that isn't in `WORKLOAD_ALLOWED_SERVICEACCOUNTS`, gets
 `Unauthenticated`; a listed caller on a method it isn't listed for gets `PermissionDenied`. The

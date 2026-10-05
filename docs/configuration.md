@@ -27,7 +27,7 @@ The audit service makes no gRPC calls of its own, so it needs no token of its ow
 | `WORKLOAD_OIDC_CA_FILE` | system roots | Extra PEM CA bundle for discovery and the JWKS fetch. |
 | `WORKLOAD_OIDC_BEARER_FILE` | (unset) | Bearer token sent on discovery and the JWKS fetch, re-read on every fetch. |
 | `WORKLOAD_AUDIENCE` | `sneakers` | The token's `aud` must contain it. |
-| `WORKLOAD_ALLOWED_SERVICEACCOUNTS` | (required) | Comma list of `<namespace>/<serviceaccount>`: for audit, `<ns>/sneakers-gateway,<ns>/sneakers-vault,<ns>/sneakers-sshbroker,<ns>/sneakers-identity,<ns>/sneakers-workflow`. Add `<ns>/sneakers-migrate` only while the migration Job runs, and take it out when the Job is done. |
+| `WORKLOAD_ALLOWED_SERVICEACCOUNTS` | (required) | Comma list of `<namespace>/<serviceaccount>`: for audit, `<ns>/sneakers-gateway,<ns>/sneakers-vault,<ns>/sneakers-sshbroker,<ns>/sneakers-identity,<ns>/sneakers-workflow`. Add `<ns>/sneakers-migrate` only while the migration Job runs, and take it out when the Job is done. On the appliance, add `<ns>/sneakers-appliance` (OS audit forwarding, `RecordEvent` with `actor_type=appliance-admin` only). |
 | `WORKLOAD_AUTH` | (unset) | `disabled` turns the check off, for local development only: every caller that reaches the port is trusted, and a warning is logged at start and every 5 minutes. No other value is accepted. |
 
 Without `WORKLOAD_OIDC_ISSUER` the service refuses to start, unless `WORKLOAD_AUTH=disabled`;

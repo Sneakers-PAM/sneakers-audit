@@ -25,7 +25,8 @@ WORKLOAD_AUTH=disabled DATABASE_DSN='postgres://audit@localhost:5432/audit?sslmo
 The container trusts local connections without a password, and `WORKLOAD_AUTH=disabled` lets any
 local caller in without a workload token, both for development only. In a cluster the service
 accepts only the gateway, vault, SSH broker, identity and workflow, by their ServiceAccount
-tokens, plus the sneakers-migrate Job while it runs (RecordEvent and VerifyChain only). It applies its migrations at start and listens for gRPC on port 9090.
+tokens, plus the sneakers-migrate Job while it runs (RecordEvent and VerifyChain only) and, on the
+appliance, the appliance's controller (RecordEvent with `appliance-admin` events only). It applies its migrations at start and listens for gRPC on port 9090.
 
 Run the tests, including the Postgres integration test:
 
