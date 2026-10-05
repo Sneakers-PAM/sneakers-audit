@@ -1,7 +1,7 @@
 // Copyright 2026 The Sneakers-PAM Authors
 // SPDX-License-Identifier: Apache-2.0
 
-package health
+package server
 
 import (
 	"context"
@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Bugs5382/go-buildinfo/health"
 	log "github.com/Bugs5382/go-log"
 	postgres "github.com/Bugs5382/go-postgres"
 )
@@ -31,12 +32,13 @@ func TestPostgres_StopAndStartMidTest(t *testing.T) {
 	}
 	defer db.Close()
 
-	clk := time.Now()
-	c := New(log.Nop(), Postgres(db))
-	c.now = func() time.Time { return clk }
-	report := func() Report { clk = clk.Add(CacheTTL); return c.Report(ctx) }
+	c, err := NewChecker(log.Nop(), []health.Dependency{Postgres(db)}, health.WithTTL(testTTL))
+	if err != nil {
+		t.Fatal(err)
+	}
+	report := func() health.Report { time.Sleep(testTTL); return c.Report(ctx) }
 
-	if r := report(); r.Status != StateOK {
+	if r := report(); r.Status != health.StateOK || r.Dependencies[0].Version == "unknown" {
 		t.Fatalf("before the stop: %+v", r)
 	}
 	docker(t, "stop", name)
@@ -46,7 +48,7 @@ func TestPostgres_StopAndStartMidTest(t *testing.T) {
 			_ = exec.Command("docker", "start", name).Run()
 		}
 	})
-	if r := report(); r.Status != StateDown || r.Dependencies[0].Error == "" {
+	if r := report(); r.Status != health.StateDown || r.Ready || r.Dependencies[0].Error == "" {
 		t.Fatalf("while stopped: %+v", r)
 	}
 	docker(t, "start", name)
@@ -54,7 +56,7 @@ func TestPostgres_StopAndStartMidTest(t *testing.T) {
 	deadline := time.Now().Add(30 * time.Second)
 	for {
 		r := report()
-		if r.Status == StateOK {
+		if r.Status == health.StateOK {
 			break
 		}
 		if time.Now().After(deadline) {

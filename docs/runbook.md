@@ -42,13 +42,14 @@ audit out of its Service without restarting it. The kubelet's liveness probe has
 
 Audit calls no other service and uses no broker. The `sneakers-health` header (see
 [api.md](api.md)) shows each dependency's state, error class and last check. A state change logs
-one line: `health: dependency down` at warn, `health: dependency recovered` at info, with the
-dependency, whether it's required and the error class; never the DSN or the error text.
+one line: `dependency check failing` at warn, `dependency recovered` at info, with the
+dependency, whether it's required, the states it moved between and the error class; never the
+DSN or the error text.
 
 To see which build is running, ask for the response headers (`grpcurl -v`): the answer carries
-`sneakers-version`, `sneakers-commit` and, once the database answered, `sneakers-dep-postgres`
-(a `postgres version unknown` warning at start means it didn't). The image build stamps the
-version and commit from its `VERSION` and `COMMIT` build arguments:
+`sneakers-version`, `sneakers-commit` and `sneakers-dep-postgres` (`unknown` until the database
+answered `SHOW server_version`). The image build stamps the version and commit from its `VERSION`
+and `COMMIT` build arguments, into go-buildinfo's `Version` and `Commit`:
 
 ```bash
 docker build --build-arg VERSION=v0.1.0 --build-arg COMMIT="$(git rev-parse HEAD)" .

@@ -9,13 +9,13 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/Bugs5382/go-buildinfo/health"
 	log "github.com/Bugs5382/go-log"
 	otel "github.com/Bugs5382/go-otel"
 	postgres "github.com/Bugs5382/go-postgres"
 	otelpg "github.com/Bugs5382/go-postgres/otel"
 	"github.com/Sneakers-PAM/sneakers-audit/internal/config"
 	"github.com/Sneakers-PAM/sneakers-audit/internal/grpcsvc"
-	"github.com/Sneakers-PAM/sneakers-audit/internal/health"
 	"github.com/Sneakers-PAM/sneakers-audit/internal/server"
 	"github.com/Sneakers-PAM/sneakers-audit/internal/workloadauth"
 	"google.golang.org/grpc"
@@ -69,9 +69,6 @@ func main() {
 		logger.Fatal().Err(err).Msg("db connect")
 	}
 	defer db.Close()
-	if err := server.RecordPostgresVersion(ctx, db.Querier()); err != nil {
-		logger.Warn().Err(err).Msg("postgres version unknown; the health check won't report it")
-	}
 
 	// Direct (no-broker) audit: services call RecordEvent over gRPC and the
 	// hash-chained trail is persisted append-only to Postgres.
@@ -85,7 +82,10 @@ func main() {
 	}
 	logger.Info().Str("port", cfg.GRPCPort).Msg("starting")
 	// Readiness follows Postgres: every RPC reads or writes the trail there.
-	checker := health.New(svcLog, health.Postgres(db))
+	checker, err := server.NewChecker(svcLog, []health.Dependency{server.Postgres(db)})
+	if err != nil {
+		logger.Fatal().Err(err).Msg("health checker")
+	}
 	if err := server.RunWithHealth(ctx, cfg.GRPCPort, svcLog, checker, func(gs *grpc.Server) {
 		grpcsvc.RegisterServer(gs, svc)
 	}, authOpts...); err != nil {
