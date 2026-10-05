@@ -9,7 +9,9 @@ reflection.
 
 A health check's answer carries the build in its response headers: `sneakers-version` (the image
 tag, `dev` when unstamped) and `sneakers-commit` (the source commit, `unknown` when neither the
-build nor Go's VCS stamp knows it). The gateway's diagnostics read them.
+build nor Go's VCS stamp knows it). It also carries `sneakers-dep-postgres`, the database
+server's version (`SHOW server_version`, first token, at most 64 characters), read once at start;
+the header is left out when that read failed. The gateway's diagnostics read them.
 
 ## Callers
 
