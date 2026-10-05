@@ -13,6 +13,25 @@ build nor Go's VCS stamp knows it). It also carries `sneakers-dep-postgres`, the
 server's version (`SHOW server_version`, first token, at most 64 characters), read once at start;
 the header is left out when that read failed. The gateway's diagnostics read them.
 
+The health check has two services:
+
+- `""` (the default) is readiness. It answers `NOT_SERVING` while PostgreSQL, a required
+  dependency, doesn't answer a ping, and `SERVING` again once it does. Each ping has a 1-second
+  timeout and its result answers for 5 seconds, so frequent probes don't load the database. Its
+  answer carries `sneakers-health`, a compact JSON report:
+
+  ```json
+  {"status":"down","dependencies":[{"name":"postgres","state":"down","required":true,"error":"refused","checkedAt":"2026-10-05T12:00:05Z","version":"17.11"}]}
+  ```
+
+  `status` and each `state` are `ok`, `degraded` (an optional dependency is failing; still
+  serving) or `down` (a required one is; not serving). `error` is a class, never the error
+  itself: `timeout`, `refused`, `unavailable`, `unauthenticated` or `error`. `version` is the one
+  in `sneakers-dep-*`, when known.
+- `liveness` answers `SERVING` whenever the process does and never touches a dependency.
+
+Any other service name is `NOT_FOUND`. `Watch` is not supported (`UNIMPLEMENTED`); poll `Check`.
+
 ## Callers
 
 Every call must carry the caller's workload identity: its projected Kubernetes ServiceAccount
