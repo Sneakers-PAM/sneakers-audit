@@ -40,6 +40,9 @@ func Register(gs *grpc.Server) { auditv1.RegisterAuditServiceServer(gs, New()) }
 func RegisterServer(gs *grpc.Server, s *Server) { auditv1.RegisterAuditServiceServer(gs, s) }
 
 func (s *Server) RecordEvent(ctx context.Context, req *auditv1.RecordEventRequest) (*auditv1.RecordEventResponse, error) {
+	if err := checkActorType(ctx, req); err != nil {
+		return nil, err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
