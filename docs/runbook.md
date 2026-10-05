@@ -30,6 +30,14 @@ as is, and so does a client that knows the health API without asking the server:
 grpc_health_probe -addr localhost:9090
 ```
 
+To see which build is running, ask for the response headers (`grpcurl -v`): the answer carries
+`sneakers-version` and `sneakers-commit`. The image build stamps them from its `VERSION` and
+`COMMIT` build arguments:
+
+```bash
+docker build --build-arg VERSION=v0.1.0 --build-arg COMMIT="$(git rev-parse HEAD)" .
+```
+
 Server reflection, which grpcurl uses to find a method, is not on any caller's allow-list, so
 with authentication on it is refused. Give grpcurl the protos instead (`-import-path proto
 -proto <file>`), or run locally with `WORKLOAD_AUTH=disabled`, where reflection works as before.
