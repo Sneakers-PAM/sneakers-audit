@@ -50,6 +50,10 @@ scripts/workloadauth-check.sh  # internal/workloadauth must match the vault's co
 - [docs/runbook.md](docs/runbook.md): operating the service.
 - [proto/sneakers/audit/v1/audit.proto](proto/sneakers/audit/v1/audit.proto): the API definition.
 
+## 🙏 Acknowledgements
+
+Sneakers-PAM was originally written by [@Bugs5382](https://github.com/Bugs5382).
+
 ## ⚖️ License
 
 Apache-2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE).
