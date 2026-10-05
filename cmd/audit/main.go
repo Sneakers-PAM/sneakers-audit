@@ -68,6 +68,9 @@ func main() {
 		logger.Fatal().Err(err).Msg("db connect")
 	}
 	defer db.Close()
+	if err := server.RecordPostgresVersion(ctx, db.Querier()); err != nil {
+		logger.Warn().Err(err).Msg("postgres version unknown; the health check won't report it")
+	}
 
 	// Direct (no-broker) audit: services call RecordEvent over gRPC and the
 	// hash-chained trail is persisted append-only to Postgres.
