@@ -15,10 +15,9 @@ change to the canonical form or the hash breaks `VerifyChain` for every stored t
 - `cmd/audit/` - the entrypoint: config, migrations, the gRPC server.
 - `internal/chain/` - canonical form and hash chaining.
 - `internal/grpcsvc/` - the service and its Postgres and in-memory stores, with their tests.
-- `internal/workloadauth/` - service-to-service authentication, a byte-for-byte copy of
-  sneakers-vault's package at `SNEAKERS_VAULT_REF` (`proto-refs.env`). Never edit it here: change
-  it in the vault, then copy it and bump the ref (`scripts/workloadauth-check.sh` fails CI
-  otherwise). The allow-list is `internal/grpcsvc/callers.go`; a new RPC needs an entry there.
+- Service-to-service authentication comes from `github.com/Bugs5382/go-workload-identity`;
+  `internal/server/workloadauth.go` sets the Sneakers audience and caller-name prefix and builds
+  the interceptors. The allow-list is `internal/grpcsvc/callers.go`; a new RPC needs an entry there.
 - `internal/config/`, `internal/server/` - the env loader and the gRPC server bootstrap, with the
   health service and readiness checks from `github.com/Bugs5382/go-buildinfo`.
 - `proto/` - the API; `gen/go/` - the generated Go (committed, checked current in CI).
@@ -65,7 +64,4 @@ Follow the logging rules in `CLAUDE.md`. In short:
   `@<sha>`) of a `github.com/Bugs5382/*` or `github.com/Sneakers-PAM/*` module; the
   `proto-sync / check` job fails on either. To compile and test against a local package checkout,
   use a git-ignored `go.work` beside `go.mod` (`go work init . ../go-<pkg>`, which writes
-  `use . ../go-<pkg>`); `go.work` and `go.work.sum` are in `.gitignore`. Here `SNEAKERS_VAULT_REF`
-  pins no protos: it is the sneakers-vault commit `internal/workloadauth/` is copied from, and
-  `SNEAKERS_VAULT_DIR` points `scripts/workloadauth-check.sh` at a local sneakers-vault checkout
-  instead.
+  `use . ../go-<pkg>`); `go.work` and `go.work.sum` are in `.gitignore`.

@@ -10,8 +10,9 @@ import (
 	"testing"
 
 	log "github.com/Bugs5382/go-log"
+	workloadauth "github.com/Bugs5382/go-workload-identity"
 	auditv1 "github.com/Sneakers-PAM/sneakers-audit/gen/go/sneakers/audit/v1"
-	"github.com/Sneakers-PAM/sneakers-audit/internal/workloadauth"
+	"github.com/Sneakers-PAM/sneakers-audit/internal/server"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
@@ -80,7 +81,10 @@ func newAuthFixture(t *testing.T) *authFixture {
 	for _, c := range []string{"gateway", "vault", "sshbroker", "identity", "workflow", "migrate", "appliance", "mcp"} {
 		allowed = append(allowed, authNS+"/sneakers-"+c)
 	}
-	v, err := workloadauth.NewVerifier(workloadauth.Config{Issuer: iss.URL, CAFile: iss.CAFile, AllowedServiceAccounts: allowed}, log.Nop())
+	v, err := workloadauth.NewVerifier(workloadauth.Config{
+		Issuer: iss.URL, CAFile: iss.CAFile, AllowedServiceAccounts: allowed,
+		Audience: server.WorkloadAudience, ServiceAccountPrefix: server.WorkloadServiceAccountPrefix,
+	}, log.Nop())
 	if err != nil {
 		t.Fatal(err)
 	}

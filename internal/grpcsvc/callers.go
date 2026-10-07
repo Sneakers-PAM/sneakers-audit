@@ -6,8 +6,8 @@ package grpcsvc
 import (
 	"context"
 
+	workloadauth "github.com/Bugs5382/go-workload-identity"
 	auditv1 "github.com/Sneakers-PAM/sneakers-audit/gen/go/sneakers/audit/v1"
-	"github.com/Sneakers-PAM/sneakers-audit/internal/workloadauth"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )

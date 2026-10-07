@@ -17,7 +17,6 @@ import (
 	"github.com/Sneakers-PAM/sneakers-audit/internal/config"
 	"github.com/Sneakers-PAM/sneakers-audit/internal/grpcsvc"
 	"github.com/Sneakers-PAM/sneakers-audit/internal/server"
-	"github.com/Sneakers-PAM/sneakers-audit/internal/workloadauth"
 	"google.golang.org/grpc"
 )
 
@@ -45,7 +44,7 @@ func main() {
 
 	// Service-to-service authentication fails closed: check it before anything
 	// else so a missing issuer stops the boot with the schema untouched.
-	if _, _, err := workloadauth.ServerConfigFromEnv(os.Getenv); err != nil {
+	if _, _, err := server.WorkloadConfigFromEnv(os.Getenv); err != nil {
 		logger.Fatal().Err(err).Msg("workload auth config")
 	}
 
