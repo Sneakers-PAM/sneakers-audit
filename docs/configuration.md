@@ -36,6 +36,11 @@ The audit service makes no gRPC calls of its own, so it needs no token of its ow
 Without `WORKLOAD_OIDC_ISSUER` the service refuses to start, unless `WORKLOAD_AUTH=disabled`;
 setting both is refused too.
 
+No caller can be checked before the issuer's key set has loaded, so readiness waits for it too:
+`/readyz` and the gRPC health check answer `NOT_SERVING`, with `workload-identity` reported down
+in the readiness body (`server.WorkloadIdentity`, checking `Verifier.Ready`), until then. It's
+left out of the readiness body when `WORKLOAD_AUTH=disabled`. Liveness is unaffected.
+
 Example:
 
 ```bash

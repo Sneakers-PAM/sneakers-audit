@@ -169,7 +169,7 @@ func TestWorkloadAuthAcceptsAndRefusesTokens(t *testing.T) {
 // lists only the gateway on probeMethod.
 func workloadAuthFor(t *testing.T, ctx context.Context, env map[string]string) []grpc.ServerOption {
 	t.Helper()
-	opts, err := WorkloadAuth(ctx, envOf(env), workloadauth.Policy{probeMethod: {"gateway": workloadauth.Self}}, log.Nop())
+	_, opts, err := WorkloadAuth(ctx, envOf(env), workloadauth.Policy{probeMethod: {"gateway": workloadauth.Self}}, log.Nop())
 	if err != nil {
 		t.Fatal(err)
 	}
