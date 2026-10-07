@@ -14,6 +14,7 @@ import (
 
 	"github.com/Bugs5382/go-buildinfo/health"
 	log "github.com/Bugs5382/go-log"
+	workloadauth "github.com/Bugs5382/go-workload-identity"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
@@ -118,6 +119,31 @@ func TestHealth_ReadinessFollowsPostgresLivenessDoesNot(t *testing.T) {
 	time.Sleep(testTTL)
 	if st, _ := check(t, c, ""); st != healthpb.HealthCheckResponse_SERVING {
 		t.Fatalf("readiness after recovery = %v, want SERVING", st)
+	}
+}
+
+func TestHealth_ReadinessWaitsForTheWorkloadKeySet(t *testing.T) {
+	v := fakeReadinessVerifier{err: workloadauth.ErrUnavailable}
+	checker := newTestChecker(t, WorkloadIdentity(&v))
+	c := healthClient(t, checker)
+
+	st, md := check(t, c, "")
+	if st != healthpb.HealthCheckResponse_NOT_SERVING {
+		t.Fatalf("readiness before the key set loads = %v, want NOT_SERVING", st)
+	}
+	raw := md.Get(HeaderHealth)
+	if len(raw) != 1 || !strings.Contains(raw[0], `"name":"workload-identity"`) || !strings.Contains(raw[0], `"state":"down"`) {
+		t.Fatalf("health body = %v", raw)
+	}
+
+	v.err = nil
+	time.Sleep(testTTL)
+	st, md = check(t, c, "")
+	if st != healthpb.HealthCheckResponse_SERVING {
+		t.Fatalf("readiness once the key set loads = %v, want SERVING", st)
+	}
+	if raw := md.Get(HeaderHealth); len(raw) != 1 || !strings.Contains(raw[0], `"name":"workload-identity"`) {
+		t.Fatalf("health body = %v", raw)
 	}
 }
 

@@ -75,13 +75,20 @@ func main() {
 	svcLog := log.NewLogger(serviceName)
 	// Every caller is authenticated by its workload identity and checked
 	// against grpcsvc.CallerPolicy.
-	authOpts, err := server.WorkloadAuth(ctx, os.Getenv, grpcsvc.CallerPolicy(), svcLog)
+	workloadVerifier, authOpts, err := server.WorkloadAuth(ctx, os.Getenv, grpcsvc.CallerPolicy(), svcLog)
 	if err != nil {
 		logger.Fatal().Err(err).Msg("workload auth")
 	}
 	logger.Info().Str("port", cfg.GRPCPort).Msg("starting")
 	// Readiness follows Postgres: every RPC reads or writes the trail there.
-	checker, err := server.NewChecker(svcLog, []health.Dependency{server.Postgres(db)})
+	// The workload-identity verifier is required too once authentication is
+	// on: no caller can be checked before its key set loads. It's left out
+	// when authentication is disabled (verifier nil).
+	deps := []health.Dependency{server.Postgres(db)}
+	if workloadVerifier != nil {
+		deps = append(deps, server.WorkloadIdentity(workloadVerifier))
+	}
+	checker, err := server.NewChecker(svcLog, deps)
 	if err != nil {
 		logger.Fatal().Err(err).Msg("health checker")
 	}
