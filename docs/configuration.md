@@ -15,9 +15,12 @@ The service reads its configuration from the environment.
 ## Service-to-service authentication
 
 Every caller must present its workload identity: its projected Kubernetes ServiceAccount token
-(audience `sneakers`) as `authorization: Bearer <token>`. The shared code is
-`internal/workloadauth`, a byte-for-byte copy of the package in sneakers-vault at
-`SNEAKERS_VAULT_REF` (`proto-refs.env`); CI checks the copy with `scripts/workloadauth-check.sh`.
+(audience `sneakers`) as `authorization: Bearer <token>`. The code is the owner's
+helper package [`github.com/Bugs5382/go-workload-identity`](https://github.com/Bugs5382/go-workload-identity)
+(v1.0.0), which every Sneakers service imports in place of its old private copy.
+`internal/server/workloadauth.go` sets the Sneakers values the package has no default for: the
+audience `sneakers` when `WORKLOAD_AUDIENCE` is unset, and the caller-name prefix `sneakers-`
+(`WORKLOAD_SERVICEACCOUNT_PREFIX` is not read).
 The audit service makes no gRPC calls of its own, so it needs no token of its own.
 
 | Variable | Default | Purpose |
