@@ -48,6 +48,15 @@ func main() {
 		logger.Fatal().Err(err).Msg("workload auth config")
 	}
 
+	svcLog := log.NewLogger(serviceName)
+	// The port answers health from here on, through the migrations: liveness
+	// SERVING, so the startup probe passes on a slow boot, and readiness
+	// NOT_SERVING with postgres listed down until it is reached.
+	boot, err := server.StartBootHealth(cfg.GRPCPort, svcLog, "postgres")
+	if err != nil {
+		logger.Fatal().Err(err).Msg("boot health")
+	}
+
 	migrationsDir := os.Getenv("MIGRATIONS_DIR")
 	if migrationsDir == "" {
 		migrationsDir = "migrations"
@@ -68,11 +77,11 @@ func main() {
 		logger.Fatal().Err(err).Msg("db connect")
 	}
 	defer db.Close()
+	boot.Up("postgres")
 
 	// Direct (no-broker) audit: services call RecordEvent over gRPC and the
 	// hash-chained trail is persisted append-only to Postgres.
 	svc := grpcsvc.NewPG(db.Querier())
-	svcLog := log.NewLogger(serviceName)
 	// Every caller is authenticated by its workload identity and checked
 	// against grpcsvc.CallerPolicy.
 	workloadVerifier, authOpts, err := server.WorkloadAuth(ctx, os.Getenv, grpcsvc.CallerPolicy(), svcLog)
@@ -92,6 +101,7 @@ func main() {
 	if err != nil {
 		logger.Fatal().Err(err).Msg("health checker")
 	}
+	boot.Stop()
 	if err := server.RunWithHealth(ctx, cfg.GRPCPort, svcLog, checker, func(gs *grpc.Server) {
 		grpcsvc.RegisterServer(gs, svc)
 	}, authOpts...); err != nil {

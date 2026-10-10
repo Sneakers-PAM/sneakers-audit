@@ -34,7 +34,9 @@ grpc_health_probe -addr localhost:9090 -service liveness  # liveness
 Readiness fails while PostgreSQL doesn't answer, and recovers on its own within about 5 seconds
 of it answering again. Liveness only shows that the process answers, so a database outage takes
 audit out of its Service without restarting it. The kubelet's liveness probe has to ask for the
-`liveness` service to get that; the probes are set in sneakers-release's chart.
+`liveness` service to get that; the probes are set in sneakers-release's chart. The health check
+answers during startup too, migrations included, so a slow first boot passes the startup probe and
+shows as not ready with `postgres` down rather than as a closed port.
 
 | Dependency | Required | Why |
 |---|---|---|

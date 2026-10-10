@@ -32,6 +32,12 @@ The health check has two services:
   `sneakers-dep-*`.
 - `liveness` answers `SERVING` whenever the process does and never touches a dependency.
 
+The health check answers from the moment the configuration is checked, before the migrations
+run: while the service is still reaching PostgreSQL at startup, `liveness` answers `SERVING` and
+readiness `NOT_SERVING`, with `postgres` reported `down` (class `pending` until the first attempt)
+in `sneakers-health`. The full server, with the audit API, takes the port over once PostgreSQL
+answers.
+
 Any other service name is `NOT_FOUND`. `Watch` streams the serving status of either service as it
 changes.
 
