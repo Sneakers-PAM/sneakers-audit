@@ -3,10 +3,10 @@ module github.com/Sneakers-PAM/sneakers-audit
 go 1.26.9
 
 require (
-	github.com/Bugs5382/go-buildinfo v1.0.0
+	github.com/Bugs5382/go-buildinfo v1.1.0
 	github.com/Bugs5382/go-log v1.3.0
 	github.com/Bugs5382/go-otel v1.3.2
-	github.com/Bugs5382/go-postgres v1.2.2
+	github.com/Bugs5382/go-postgres v1.3.0
 	github.com/Bugs5382/go-workload-identity v1.0.1
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.70.0

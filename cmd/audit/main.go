@@ -12,8 +12,6 @@ import (
 	"github.com/Bugs5382/go-buildinfo/health"
 	log "github.com/Bugs5382/go-log"
 	otel "github.com/Bugs5382/go-otel"
-	postgres "github.com/Bugs5382/go-postgres"
-	otelpg "github.com/Bugs5382/go-postgres/otel"
 	"github.com/Sneakers-PAM/sneakers-audit/internal/config"
 	"github.com/Sneakers-PAM/sneakers-audit/internal/grpcsvc"
 	"github.com/Sneakers-PAM/sneakers-audit/internal/server"
@@ -48,6 +46,16 @@ func main() {
 		logger.Fatal().Err(err).Msg("workload auth config")
 	}
 
+	svcLog := log.NewLogger(serviceName)
+	// The port answers health from here on, while the boot waits for
+	// Postgres and runs the migrations: liveness SERVING, so the startup probe
+	// passes on a slow boot, and readiness NOT_SERVING with postgres listed
+	// down until it is reached.
+	boot, err := server.StartBootHealth(cfg.GRPCPort, svcLog, "postgres")
+	if err != nil {
+		logger.Fatal().Err(err).Msg("boot health")
+	}
+
 	migrationsDir := os.Getenv("MIGRATIONS_DIR")
 	if migrationsDir == "" {
 		migrationsDir = "migrations"
@@ -60,19 +68,20 @@ func main() {
 	if migrateDSN == "" {
 		migrateDSN = cfg.DatabaseDSN
 	}
-	if err := postgres.Migrate(migrateDSN, migrationsDir); err != nil {
-		logger.Fatal().Err(err).Msg("migrate")
-	}
-	db, err := postgres.New(ctx, cfg.DatabaseDSN, otelpg.WithTracing())
+	db, err := openPostgres(ctx, boot, migrateDSN, migrationsDir, cfg.DatabaseDSN)
 	if err != nil {
-		logger.Fatal().Err(err).Msg("db connect")
+		if ctx.Err() != nil {
+			boot.Stop()
+			logger.Info().Msg("stopped while waiting for postgres")
+			return
+		}
+		logger.Fatal().Err(err).Msg("postgres")
 	}
 	defer db.Close()
 
 	// Direct (no-broker) audit: services call RecordEvent over gRPC and the
 	// hash-chained trail is persisted append-only to Postgres.
 	svc := grpcsvc.NewPG(db.Querier())
-	svcLog := log.NewLogger(serviceName)
 	// Every caller is authenticated by its workload identity and checked
 	// against grpcsvc.CallerPolicy.
 	workloadVerifier, authOpts, err := server.WorkloadAuth(ctx, os.Getenv, grpcsvc.CallerPolicy(), svcLog)
@@ -92,6 +101,7 @@ func main() {
 	if err != nil {
 		logger.Fatal().Err(err).Msg("health checker")
 	}
+	boot.Stop()
 	if err := server.RunWithHealth(ctx, cfg.GRPCPort, svcLog, checker, func(gs *grpc.Server) {
 		grpcsvc.RegisterServer(gs, svc)
 	}, authOpts...); err != nil {
