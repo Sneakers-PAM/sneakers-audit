@@ -12,8 +12,6 @@ import (
 	"github.com/Bugs5382/go-buildinfo/health"
 	log "github.com/Bugs5382/go-log"
 	otel "github.com/Bugs5382/go-otel"
-	postgres "github.com/Bugs5382/go-postgres"
-	otelpg "github.com/Bugs5382/go-postgres/otel"
 	"github.com/Sneakers-PAM/sneakers-audit/internal/config"
 	"github.com/Sneakers-PAM/sneakers-audit/internal/grpcsvc"
 	"github.com/Sneakers-PAM/sneakers-audit/internal/server"
@@ -49,9 +47,10 @@ func main() {
 	}
 
 	svcLog := log.NewLogger(serviceName)
-	// The port answers health from here on, through the migrations: liveness
-	// SERVING, so the startup probe passes on a slow boot, and readiness
-	// NOT_SERVING with postgres listed down until it is reached.
+	// The port answers health from here on, while the boot waits for
+	// Postgres and runs the migrations: liveness SERVING, so the startup probe
+	// passes on a slow boot, and readiness NOT_SERVING with postgres listed
+	// down until it is reached.
 	boot, err := server.StartBootHealth(cfg.GRPCPort, svcLog, "postgres")
 	if err != nil {
 		logger.Fatal().Err(err).Msg("boot health")
@@ -69,15 +68,16 @@ func main() {
 	if migrateDSN == "" {
 		migrateDSN = cfg.DatabaseDSN
 	}
-	if err := postgres.Migrate(migrateDSN, migrationsDir); err != nil {
-		logger.Fatal().Err(err).Msg("migrate")
-	}
-	db, err := postgres.New(ctx, cfg.DatabaseDSN, otelpg.WithTracing())
+	db, err := openPostgres(ctx, boot, migrateDSN, migrationsDir, cfg.DatabaseDSN)
 	if err != nil {
-		logger.Fatal().Err(err).Msg("db connect")
+		if ctx.Err() != nil {
+			boot.Stop()
+			logger.Info().Msg("stopped while waiting for postgres")
+			return
+		}
+		logger.Fatal().Err(err).Msg("postgres")
 	}
 	defer db.Close()
-	boot.Up("postgres")
 
 	// Direct (no-broker) audit: services call RecordEvent over gRPC and the
 	// hash-chained trail is persisted append-only to Postgres.

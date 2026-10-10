@@ -78,6 +78,17 @@ func (b *BootHealth) Waiting(name string, err error) {
 	b.set(name, health.StateDown, bootClass(err))
 }
 
+// RetryHook is the hook for a startup wait on name (go-postgres' or
+// go-redis' WithRetryHook): each failed attempt logs one warning, with the
+// attempt, the wait that follows and the error, and is recorded as Waiting.
+func (b *BootHealth) RetryHook(name string) func(attempt int, err error, delay time.Duration) {
+	return func(attempt int, err error, delay time.Duration) {
+		b.lg.Warn("dependency not reachable yet; retrying", log.F("dependency", name), log.F("attempt", attempt),
+			log.F("retry_in", delay.String()), log.F("error", err.Error()))
+		b.Waiting(name, err)
+	}
+}
+
 // Up records that name is reachable.
 func (b *BootHealth) Up(name string) {
 	b.set(name, health.StateOK, "")

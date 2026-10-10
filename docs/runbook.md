@@ -38,6 +38,11 @@ audit out of its Service without restarting it. The kubelet's liveness probe has
 answers during startup too, migrations included, so a slow first boot passes the startup probe and
 shows as not ready with `postgres` down rather than as a closed port.
 
+At startup audit waits for PostgreSQL rather than exiting: while it (or its DNS name) isn't
+reachable, the migrations and the connection are retried with backoff (500 ms doubling to 15 s,
+with jitter), one `dependency not reachable yet; retrying` warning per attempt. Only an error that
+retrying can't fix, such as bad credentials or a failing migration, stops the boot.
+
 | Dependency | Required | Why |
 |---|---|---|
 | PostgreSQL | yes | Every RPC reads or appends to the trail in `audit_records`; without it audit can't answer any of them. |

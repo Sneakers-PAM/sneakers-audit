@@ -9,6 +9,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Bugs5382/go-buildinfo/health"
 	postgres "github.com/Bugs5382/go-postgres"
@@ -21,6 +22,9 @@ func healthHeaders(t *testing.T, version func(context.Context) (string, error)) 
 	t.Helper()
 	c := healthClient(t, newTestChecker(t, health.Dependency{Name: "postgres", Required: true,
 		Check: func(context.Context) error { return nil }, Version: version}))
+	eventuallyServing(t, c)
+	// The version is read in the same background pass; give it one more.
+	time.Sleep(2 * testTTL)
 	_, md := check(t, c, "")
 	return md
 }

@@ -36,7 +36,8 @@ func TestPostgres_StopAndStartMidTest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	report := func() health.Report { time.Sleep(testTTL); return c.Report(ctx) }
+	refreshed(t, c)
+	report := func() health.Report { time.Sleep(2 * testTTL); return c.Report(ctx) }
 
 	if r := report(); r.Status != health.StateOK || r.Dependencies[0].Version == "unknown" {
 		t.Fatalf("before the stop: %+v", r)

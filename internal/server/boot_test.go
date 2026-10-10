@@ -109,3 +109,19 @@ func TestBootHealth_StopIsIdempotent(t *testing.T) {
 		t.Fatal("Stop hung")
 	}
 }
+
+// The hook a startup wait calls after each failed attempt keeps the boot
+// report current.
+func TestBootHealth_RetryHookRecordsTheAttempt(t *testing.T) {
+	port := freePort(t)
+	b, err := StartBootHealth(port, log.Nop(), "postgres")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(b.Stop)
+	b.RetryHook("postgres")(3, fmt.Errorf("dial: %w", syscall.ECONNREFUSED), 2*time.Second)
+	r := bootReport(t, bootClient(t, port))
+	if d := r.Dependencies[0]; d.State != health.StateDown || d.Error != "refused" || d.CheckedAt.IsZero() {
+		t.Fatalf("postgres after a retried attempt = %+v", d)
+	}
+}

@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -26,6 +27,41 @@ import (
 // testTTL is the cache window the tests run with; waiting it out lets the next
 // check run again.
 const testTTL = time.Second
+
+// switchedVerifier is a ReadinessVerifier fake whose answer the test changes
+// while the background refresh reads it.
+type switchedVerifier struct {
+	mu  sync.Mutex
+	err error
+}
+
+func (v *switchedVerifier) set(err error) { v.mu.Lock(); v.err = err; v.mu.Unlock() }
+
+func (v *switchedVerifier) Ready() error { v.mu.Lock(); defer v.mu.Unlock(); return v.err }
+
+// refreshed runs c's background refresh for the test and waits for its first
+// pass, so Report has results to read.
+func refreshed(t *testing.T, c *health.Checker) *health.Checker {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { c.Run(ctx); close(done) }()
+	t.Cleanup(func() { cancel(); <-done })
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		pending := false
+		for _, d := range c.Report(context.Background()).Dependencies {
+			pending = pending || d.Error == ClassPending
+		}
+		if !pending {
+			return c
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the first background refresh never settled")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
 
 func newTestChecker(t *testing.T, deps ...health.Dependency) *health.Checker {
 	t.Helper()
@@ -74,11 +110,9 @@ func TestHealth_ReadinessFollowsPostgresLivenessDoesNot(t *testing.T) {
 	}, Version: func(context.Context) (string, error) { return "17.11", nil }})
 	c := healthClient(t, checker)
 
-	if st, _ := check(t, c, ""); st != healthpb.HealthCheckResponse_SERVING {
-		t.Fatalf("readiness while healthy = %v", st)
-	}
+	eventuallyServing(t, c)
 	down.Store(true)
-	time.Sleep(testTTL)
+	time.Sleep(2 * testTTL)
 	st, md := check(t, c, "")
 	if st != healthpb.HealthCheckResponse_NOT_SERVING {
 		t.Fatalf("readiness while postgres is down = %v, want NOT_SERVING", st)
@@ -116,15 +150,16 @@ func TestHealth_ReadinessFollowsPostgresLivenessDoesNot(t *testing.T) {
 	}
 
 	down.Store(false)
-	time.Sleep(testTTL)
+	time.Sleep(2 * testTTL)
 	if st, _ := check(t, c, ""); st != healthpb.HealthCheckResponse_SERVING {
 		t.Fatalf("readiness after recovery = %v, want SERVING", st)
 	}
 }
 
 func TestHealth_ReadinessWaitsForTheWorkloadKeySet(t *testing.T) {
-	v := fakeReadinessVerifier{err: workloadauth.ErrUnavailable}
-	checker := newTestChecker(t, WorkloadIdentity(&v))
+	v := &switchedVerifier{}
+	v.set(workloadauth.ErrUnavailable)
+	checker := newTestChecker(t, WorkloadIdentity(v))
 	c := healthClient(t, checker)
 
 	st, md := check(t, c, "")
@@ -136,8 +171,8 @@ func TestHealth_ReadinessWaitsForTheWorkloadKeySet(t *testing.T) {
 		t.Fatalf("health body = %v", raw)
 	}
 
-	v.err = nil
-	time.Sleep(testTTL)
+	v.set(nil)
+	time.Sleep(2 * testTTL)
 	st, md = check(t, c, "")
 	if st != healthpb.HealthCheckResponse_SERVING {
 		t.Fatalf("readiness once the key set loads = %v, want SERVING", st)
@@ -178,3 +213,43 @@ func TestHealth_NilCheckerIsAlwaysReady(t *testing.T) {
 }
 
 func contains(s, sub string) bool { return strings.Contains(s, sub) }
+
+// Readiness reads a cache refreshed in the background: a probe never waits on
+// a dependency check, however slow it is.
+func TestHealth_ReadinessNeverWaitsOnACheck(t *testing.T) {
+	var slow atomic.Bool
+	checker := newTestChecker(t, health.Dependency{Name: "postgres", Required: true, Check: func(ctx context.Context) error {
+		if slow.Load() {
+			<-ctx.Done()
+			return ctx.Err()
+		}
+		return nil
+	}})
+	c := healthClient(t, checker)
+	eventuallyServing(t, c)
+	slow.Store(true)
+	time.Sleep(2 * testTTL)
+	for range 5 {
+		start := time.Now()
+		check(t, c, "")
+		if d := time.Since(start); d > 200*time.Millisecond {
+			t.Fatalf("readiness took %v during a slow check, want a cache read", d)
+		}
+	}
+}
+
+// eventuallyServing waits for the first background refresh to make the
+// service ready.
+func eventuallyServing(t *testing.T, c healthpb.HealthClient) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if st, _ := check(t, c, ""); st == healthpb.HealthCheckResponse_SERVING {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("readiness never became SERVING")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}

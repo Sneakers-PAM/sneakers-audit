@@ -17,8 +17,10 @@ every 5 minutes, `unknown` until the first read succeeds), and `sneakers-depstat
 The health check has two services:
 
 - `""` (the default) is readiness. It answers `NOT_SERVING` while PostgreSQL, a required
-  dependency, doesn't answer a ping, and `SERVING` again once it does. Each ping has a 1-second
-  timeout and its result answers for 5 seconds, so frequent probes don't load the database. Its
+  dependency, doesn't answer a ping, and `SERVING` again once it does. The pings run in the
+  background every 5 seconds, each with a 1-second timeout, and a check only reads their last
+  result, so a probe never waits on the database and frequent probes don't load it. Right after
+  the start, before the first pass, each dependency is `down` with the class `pending`. Its
   answer carries `sneakers-health`, a compact JSON report:
 
   ```json
@@ -35,8 +37,8 @@ The health check has two services:
 The health check answers from the moment the configuration is checked, before the migrations
 run: while the service is still reaching PostgreSQL at startup, `liveness` answers `SERVING` and
 readiness `NOT_SERVING`, with `postgres` reported `down` (class `pending` until the first attempt)
-in `sneakers-health`. The full server, with the audit API, takes the port over once PostgreSQL
-answers.
+in `sneakers-health`. The boot retries with backoff until PostgreSQL answers, and the full server, with
+the audit API, then takes the port over.
 
 Any other service name is `NOT_FOUND`. `Watch` streams the serving status of either service as it
 changes.
