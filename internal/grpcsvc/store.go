@@ -6,6 +6,7 @@ package grpcsvc
 import (
 	"context"
 	"encoding/json"
+	"slices"
 
 	postgres "github.com/Bugs5382/go-postgres"
 	auditv1 "github.com/Sneakers-PAM/sneakers-audit/gen/go/sneakers/audit/v1"
@@ -17,8 +18,9 @@ type Store interface {
 	// Last returns the most recent record, or nil if the chain is empty.
 	Last(ctx context.Context) (*auditv1.AuditRecord, error)
 	Append(ctx context.Context, rec *auditv1.AuditRecord) error
-	// All returns every record ordered by seq (for chain verification).
-	All(ctx context.Context) ([]*auditv1.AuditRecord, error)
+	// Each calls fn with every record in seq order, one at a time, without
+	// holding the chain (for chain verification); an error from fn stops it.
+	Each(ctx context.Context, fn func(*auditv1.AuditRecord) error) error
 	// List filters by actor/subject (empty = any), drops records whose action is
 	// in excludeActions across the WHOLE chain, then keeps the most-recent limit
 	// (0 = all). Exclusion is applied BEFORE the limit so it spans the entire
@@ -43,8 +45,13 @@ func (m *memStore) Append(_ context.Context, rec *auditv1.AuditRecord) error {
 	m.records = append(m.records, rec)
 	return nil
 }
-func (m *memStore) All(context.Context) ([]*auditv1.AuditRecord, error) {
-	return m.records, nil
+func (m *memStore) Each(_ context.Context, fn func(*auditv1.AuditRecord) error) error {
+	for _, r := range m.records {
+		if err := fn(r); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 func (m *memStore) List(_ context.Context, actor, subject string, excludeActions []string, limit int) ([]*auditv1.AuditRecord, error) {
 	excluded := make(map[string]bool, len(excludeActions))
@@ -128,21 +135,41 @@ func (p *pgStore) Append(ctx context.Context, rec *auditv1.AuditRecord) error {
 	return err
 }
 
-func (p *pgStore) All(ctx context.Context) ([]*auditv1.AuditRecord, error) {
-	rows, err := p.db.Query(ctx, `SELECT `+selectCols+` FROM audit_records ORDER BY seq`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []*auditv1.AuditRecord
-	for rows.Next() {
-		r, err := scanRecord(rows)
+// eachBatch is how many records Each reads per query.
+var eachBatch = 5000
+
+// Each reads the chain in seq order in batches of eachBatch (keyset on seq),
+// so only one batch is held at a time.
+func (p *pgStore) Each(ctx context.Context, fn func(*auditv1.AuditRecord) error) error {
+	var after uint64
+	for {
+		rows, err := p.db.Query(ctx, `SELECT `+selectCols+` FROM audit_records WHERE seq > $1 ORDER BY seq LIMIT $2`, after, eachBatch)
 		if err != nil {
-			return nil, err
+			return err
 		}
-		out = append(out, r)
+		var batch []*auditv1.AuditRecord
+		for rows.Next() {
+			r, err := scanRecord(rows)
+			if err != nil {
+				rows.Close()
+				return err
+			}
+			batch = append(batch, r)
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		for _, r := range batch {
+			if err := fn(r); err != nil {
+				return err
+			}
+		}
+		if len(batch) < eachBatch {
+			return nil
+		}
+		after = batch[len(batch)-1].GetSeq()
 	}
-	return out, rows.Err()
 }
 
 func (p *pgStore) List(ctx context.Context, actor, subject string, excludeActions []string, limit int) ([]*auditv1.AuditRecord, error) {
@@ -154,11 +181,19 @@ func (p *pgStore) List(ctx context.Context, actor, subject string, excludeAction
 	if excludeActions == nil {
 		excludeActions = []string{}
 	}
-	rows, err := p.db.Query(ctx,
-		`SELECT `+selectCols+` FROM audit_records
+	// A limit is the database's: the most recent limit rows, newest first,
+	// turned back into seq order below, so a long chain isn't read whole.
+	q := `SELECT ` + selectCols + ` FROM audit_records
 		 WHERE ($1 = '' OR actor_user_id = $1) AND ($2 = '' OR subject = $2)
-		   AND action <> ALL($3::text[])
-		 ORDER BY seq`, actor, subject, excludeActions)
+		   AND action <> ALL($3::text[])`
+	args := []any{actor, subject, excludeActions}
+	if limit > 0 {
+		q += ` ORDER BY seq DESC LIMIT $4`
+		args = append(args, limit)
+	} else {
+		q += ` ORDER BY seq`
+	}
+	rows, err := p.db.Query(ctx, q, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -174,8 +209,8 @@ func (p *pgStore) List(ctx context.Context, actor, subject string, excludeAction
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	if limit > 0 && len(out) > limit {
-		out = out[len(out)-limit:]
+	if limit > 0 {
+		slices.Reverse(out)
 	}
 	return out, nil
 }

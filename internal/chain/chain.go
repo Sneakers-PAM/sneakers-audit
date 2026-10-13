@@ -55,18 +55,38 @@ func Hash(r *auditv1.AuditRecord) string {
 // match the previous record's hash (or the ordering/seq is wrong). brokenAtSeq
 // is the seq of the first bad record; 0 when the chain is valid.
 func Verify(records []*auditv1.AuditRecord) (bool, uint64) {
-	prev := ""
-	for i, r := range records {
-		if r.GetSeq() != uint64(i+1) {
-			return false, r.GetSeq()
-		}
-		if r.GetPrevHash() != prev {
-			return false, r.GetSeq()
-		}
-		if Hash(r) != r.GetHash() {
-			return false, r.GetSeq()
-		}
-		prev = r.GetHash()
+	var v Verifier
+	for _, r := range records {
+		v.Add(r)
 	}
-	return true, 0
+	return v.Result()
 }
+
+// Verifier checks a chain one record at a time, in seq order, so a chain of
+// any length is verified without holding it: it keeps only the last hash and
+// the first bad record's seq.
+type Verifier struct {
+	n        uint64
+	prev     string
+	brokenAt uint64
+	broken   bool
+}
+
+// Add checks the next record. After the first bad record it only counts.
+func (v *Verifier) Add(r *auditv1.AuditRecord) {
+	v.n++
+	if v.broken {
+		return
+	}
+	if r.GetSeq() != v.n || r.GetPrevHash() != v.prev || Hash(r) != r.GetHash() {
+		v.broken, v.brokenAt = true, r.GetSeq()
+		return
+	}
+	v.prev = r.GetHash()
+}
+
+// Result is (valid, brokenAtSeq), as Verify answers.
+func (v *Verifier) Result() (bool, uint64) { return !v.broken, v.brokenAt }
+
+// Length is how many records were added.
+func (v *Verifier) Length() uint64 { return v.n }

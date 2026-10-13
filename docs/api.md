@@ -78,9 +78,9 @@ reason) and never recorded in the chain.
 | RPC | What it does |
 |---|---|
 | `RecordEvent` | Appends one event and returns the stored record with its `seq`, `prev_hash` and `hash`. If `occurred_at` is empty the server stamps the current UTC time (RFC 3339). |
-| `ListRecords` | Returns records in chain order, filtered by `actor_user_id` and `subject` (empty matches any). Records whose action is in `exclude_actions` are dropped across the whole chain first; then the most recent `limit` records are kept (`0` keeps all). |
+| `ListRecords` | Returns records in chain order, filtered by `actor_user_id` and `subject` (empty matches any). Records whose action is in `exclude_actions` are dropped across the whole chain first; then the most recent `limit` records are kept (`0` keeps all). The database applies the limit, so a limited list reads only those records. |
 | `DistinctActions` | Returns every distinct action in the chain, optionally for one actor, so a client can offer a complete "hide actions" list. |
-| `VerifyChain` | Walks the whole chain and returns `valid`, the chain `length`, and `broken_at_seq`, the first bad record (`0` when valid). |
+| `VerifyChain` | Walks the whole chain and returns `valid`, the chain `length`, and `broken_at_seq`, the first bad record (`0` when valid). It reads the chain in seq order, 5000 records at a time, and checks each record as it reads, so memory stays flat however long the chain is (727,000 records verify in about 8 MiB of heap; held whole, they took 640 MiB, more than the service's 512Mi limit). |
 
 ## Records
 

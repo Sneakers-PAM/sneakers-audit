@@ -5,9 +5,12 @@ package grpcsvc
 
 import (
 	"context"
+	"fmt"
+	"runtime"
 	"testing"
 
 	auditv1 "github.com/Sneakers-PAM/sneakers-audit/gen/go/sneakers/audit/v1"
+	"github.com/Sneakers-PAM/sneakers-audit/internal/chain"
 )
 
 func record(t *testing.T, s *Server, action, actor, subject string) {
@@ -110,5 +113,55 @@ func TestDistinctActions(t *testing.T) {
 	byActor, _ := s.DistinctActions(context.Background(), &auditv1.DistinctActionsRequest{ActorUserId: "user-bob"})
 	if len(byActor.GetActions()) != 1 || byActor.GetActions()[0] != "b" {
 		t.Fatalf("distinct actions for bob = %v, want [b]", byActor.GetActions())
+	}
+}
+
+// streamStore hands VerifyChain a chain of n records made one at a time,
+// holding none of them, and reads the live heap as it goes.
+type streamStore struct {
+	memStore
+	n        int
+	maxHeap  uint64
+	baseHeap uint64
+}
+
+func (s *streamStore) Each(ctx context.Context, fn func(*auditv1.AuditRecord) error) error {
+	runtime.GC()
+	var ms runtime.MemStats
+	runtime.ReadMemStats(&ms)
+	s.baseHeap = ms.HeapAlloc
+	prev := ""
+	for i := 1; i <= s.n; i++ {
+		r := &auditv1.AuditRecord{Seq: uint64(i), Tier: auditv1.Tier_TIER_AUDIT, Action: "secret.reveal", ActorUserId: "user-alice",
+			Subject: fmt.Sprintf("secret-%d", i), Sensitive: true, Attributes: map[string]string{"ip": "192.0.2.10", "outcome": "ok"},
+			OccurredAt: "2026-10-13T10:00:00Z", PrevHash: prev}
+		r.Hash = chain.Hash(r)
+		prev = r.Hash
+		if err := fn(r); err != nil {
+			return err
+		}
+		if i%50000 == 0 {
+			runtime.GC()
+			runtime.ReadMemStats(&ms)
+			s.maxHeap = max(s.maxHeap, ms.HeapAlloc)
+		}
+	}
+	return nil
+}
+
+// VerifyChain verifies as it reads: a 300,000-record chain is checked
+// without the chain held in memory (held, it is hundreds of MB).
+func TestVerifyChainHoldsNoChainInMemory(t *testing.T) {
+	st := &streamStore{n: 300000}
+	s := &Server{store: st}
+	resp, err := s.VerifyChain(context.Background(), &auditv1.VerifyChainRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !resp.GetValid() || resp.GetLength() != 300000 {
+		t.Fatalf("valid=%v length=%d", resp.GetValid(), resp.GetLength())
+	}
+	if grew := int64(st.maxHeap) - int64(st.baseHeap); grew > 16<<20 {
+		t.Fatalf("the live heap grew %d MiB while verifying: the chain is held in memory", grew>>20)
 	}
 }
