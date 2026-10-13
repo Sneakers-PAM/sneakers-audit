@@ -96,10 +96,10 @@ func (s *Server) DistinctActions(ctx context.Context, req *auditv1.DistinctActio
 }
 
 func (s *Server) VerifyChain(ctx context.Context, _ *auditv1.VerifyChainRequest) (*auditv1.VerifyChainResponse, error) {
-	records, err := s.store.All(ctx)
-	if err != nil {
+	var v chain.Verifier
+	if err := s.store.Each(ctx, func(r *auditv1.AuditRecord) error { v.Add(r); return nil }); err != nil {
 		return nil, err
 	}
-	valid, brokenAt := chain.Verify(records)
-	return &auditv1.VerifyChainResponse{Valid: valid, BrokenAtSeq: brokenAt, Length: uint64(len(records))}, nil
+	valid, brokenAt := v.Result()
+	return &auditv1.VerifyChainResponse{Valid: valid, BrokenAtSeq: brokenAt, Length: v.Length()}, nil
 }
