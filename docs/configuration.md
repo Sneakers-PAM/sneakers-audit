@@ -9,8 +9,30 @@ The service reads its configuration from the environment.
 | `MIGRATIONS_DIR` | `migrations` | Directory holding the migration files. The container image sets `/migrations`. |
 | `GRPC_PORT` | `9090` | TCP port the gRPC server listens on (all interfaces). |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | (none) | OTLP gRPC collector for traces and metrics, as a URL: `http://collector:4317` for plaintext, `https://collector:4317` for TLS. A bare `host:port` still connects as plaintext, but the OpenTelemetry SDK, which reads this variable too, logs `parse url` errors at start. Any other scheme stops the service at start. Unset or empty runs without a collector: no export, no error log. |
+| `OTLP_INSECURE_SKIP_VERIFY` | (unset) | `true` turns off the collector's certificate check on an `https` endpoint. The connection stays encrypted but the collector isn't authenticated, so logs stay off while it's on; traces and metrics keep flowing. Any other value is off. |
+| `OTLP_LOGS_ENABLED` | (unset) | `true` also exports logs to the collector, on the same endpoint. Any other value is off. Stdout doesn't change. See [Log export](#log-export). |
 | `LOG_LEVEL` | `info` | `trace`, `debug`, `info`, `warn`, `error`, `fatal`, `panic` or `disabled`. |
 | `LOG_FORMAT` | `json` | `json`, `console` (or `pretty`), or `both` (JSON on stdout, console on stderr). |
+
+## Log export
+
+Export is default-deny. A record carries its time, level, service, message and trace ids, plus only
+the fields listed in `internal/telemetry` (ids, counts, durations, classes, states and short enums).
+Error text, panic values and stacks, URLs, caller names and refusal reasons stay on stdout and never
+leave. A new log field exports nothing until it's added to that list. Debug and trace lines never
+leave, whatever `LOG_LEVEL` says, and `snk_` tokens are redacted from what does. Only JSON lines are
+read, so `LOG_FORMAT=console` exports no logs.
+
+Audit entries are never logged, so they can't reach this path: the packages that hold them import no
+logger, and a test keeps it that way.
+
+## Health: the `otlp` dependency
+
+With an endpoint set, the readiness body and the gRPC health report list an optional `otlp`
+dependency. It shows `degraded` when the last export error is newer than the last success on traces
+or metrics, or on logs when logs are on. It never fails readiness, and its error is a class, never
+the exporter's text. Export errors are logged the same way, as `otel export failed` with an
+`error_class`, leaving out the endpoint and headers. Without an endpoint it isn't listed.
 
 ## Service-to-service authentication
 
