@@ -26,7 +26,6 @@ func main() {
 	defer stop()
 
 	logger := log.NewLoggerWithOptions(serviceName, log.WithOutput(telemetry.LogOutput(os.Getenv, os.Stdout)))
-	telemetry.SetErrorHandler(logger)
 	cfg, err := config.Load()
 	if err != nil {
 		logger.Fatal(err, "config")

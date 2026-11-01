@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Package telemetry holds what this service adds to go-otel: the two export
-// switches, the filters on exported logs, the export error handler and the
-// optional otlp health dependency.
+// switches, the default-deny allow-lists for every signal, the database span
+// options and the optional otlp health dependency.
 package telemetry
 
 import (
@@ -15,10 +15,10 @@ import (
 	"strings"
 
 	"github.com/Bugs5382/go-buildinfo/health"
-	log "github.com/Bugs5382/go-log"
 	otel "github.com/Bugs5382/go-otel"
-	otelapi "go.opentelemetry.io/otel"
-	"google.golang.org/grpc/status"
+	postgres "github.com/Bugs5382/go-postgres"
+	otelpg "github.com/Bugs5382/go-postgres/otel"
+	"github.com/exaring/otelpgx"
 )
 
 const (
@@ -57,6 +57,20 @@ var allowedLogFields = []string{
 
 var tokenPattern = regexp.MustCompile(`\bsnk_[A-Za-z0-9_\-]+`)
 
+// rpcMethodPattern is the shape of a real method. A client chooses the method
+// it sends, so anything else is dropped from names and attributes.
+var rpcMethodPattern = regexp.MustCompile(`^sneakers\.[a-z]+\.v1\.[A-Za-z]+/[A-Za-z]+$`)
+
+// querySpanPattern matches the trimmed database span names from PostgresTracing.
+var querySpanPattern = regexp.MustCompile(`^query [A-Z]+$`)
+
+// The attributes that may leave. Each holds a method or a status code; the
+// service serves no HTTP, and its resource carries only service.name.
+var (
+	traceAttributes  = []string{"rpc.method", "rpc.response.status_code"}
+	metricAttributes = []string{"rpc.method", "rpc.response.status_code"}
+)
+
 // AllowedLogFields returns a copy of the exported log field names.
 func AllowedLogFields() []string { return slices.Clone(allowedLogFields) }
 
@@ -70,7 +84,19 @@ func Options(getenv func(string) string) []otel.Option {
 		otel.WithLogs(enabled(getenv, EnvLogsEnabled)),
 		otel.WithLogAllowFields(allowedLogFields...),
 		otel.WithLogRedactPatterns(tokenPattern),
+		otel.WithTelemetryFilter(true),
+		otel.WithTraceAllowSpanNames(rpcMethodPattern, querySpanPattern),
+		otel.WithAttributeValuePattern("rpc.method", rpcMethodPattern),
+		otel.WithTraceAllowAttributes(traceAttributes...),
+		otel.WithMetricAllowAttributes(metricAttributes...),
+		otel.WithBaggage(false),
 	}
+}
+
+// PostgresTracing traces queries with the SQL text kept out of the span, so a
+// name is only the statement's first keyword.
+func PostgresTracing() postgres.Option {
+	return otelpg.WithTracing(otelpgx.WithTrimSQLInSpanName(), otelpgx.WithDisableSQLStatementInAttributes())
 }
 
 // LogOutput returns what the service logger writes to: stdout alone, or
@@ -81,23 +107,6 @@ func LogOutput(getenv func(string) string, stdout io.Writer) io.Writer {
 		return stdout
 	}
 	return io.MultiWriter(stdout, otel.LogWriter())
-}
-
-// SetErrorHandler sends OpenTelemetry's background errors to lg in place of
-// its default raw print to stderr. Only the class is logged, because the text
-// can name the endpoint and echo headers.
-func SetErrorHandler(lg log.Logger) {
-	otelapi.SetErrorHandler(otelapi.ErrorHandlerFunc(func(err error) {
-		lg.Warn("otel export failed", log.F("error_class", errorClass(err)))
-	}))
-}
-
-func errorClass(err error) string {
-	var gs interface{ GRPCStatus() *status.Status }
-	if errors.As(err, &gs) {
-		return gs.GRPCStatus().Code().String()
-	}
-	return health.ClassError
 }
 
 var errExportFailing = errors.New("otlp export failing")

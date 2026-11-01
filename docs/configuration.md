@@ -31,8 +31,23 @@ logger, and a test keeps it that way.
 With an endpoint set, the readiness body and the gRPC health report list an optional `otlp`
 dependency. It shows `degraded` when the last export error is newer than the last success on traces
 or metrics, or on logs when logs are on. It never fails readiness, and its error is a class, never
-the exporter's text. Export errors are logged the same way, as `otel export failed` with an
-`error_class`, leaving out the endpoint and headers. Without an endpoint it isn't listed.
+the exporter's text. Without an endpoint it isn't listed.
+
+## Telemetry filter
+
+Traces and metrics are default-deny too, through go-otel's telemetry filter, and baggage is neither
+read nor forwarded.
+
+- **Spans** keep their ids, times, kind and status code. Status text, exceptions and stacks are
+  stripped, so a panic value never leaves. A name leaves only if it's a `sneakers.*.v1` gRPC method
+  or `query <KEYWORD>`; any other span stays in the trace, named `[span]`.
+- **Span and metric attributes** are `rpc.method`, which must match the method shape, and
+  `rpc.response.status_code`.
+- **The resource** is `service.name` alone, whatever `OTEL_RESOURCE_ATTRIBUTES` says.
+- **SQL text** isn't put on database spans at all.
+- **SDK errors** print only the gRPC code, through the standard logger, at most one line every 30
+  seconds. A bad setting shows only as a short message, so turn the filter off in a safe environment
+  to see more.
 
 ## Service-to-service authentication
 

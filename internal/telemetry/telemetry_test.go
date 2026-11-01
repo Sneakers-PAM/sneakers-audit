@@ -7,9 +7,12 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"go/parser"
 	"go/token"
+	stdlog "log"
 	"net"
+	"os"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -21,12 +24,18 @@ import (
 	"github.com/Bugs5382/go-buildinfo/health"
 	log "github.com/Bugs5382/go-log"
 	otel "github.com/Bugs5382/go-otel"
+	postgres "github.com/Bugs5382/go-postgres"
+	auditv1 "github.com/Sneakers-PAM/sneakers-audit/gen/go/sneakers/audit/v1"
 	"github.com/Sneakers-PAM/sneakers-audit/internal/server"
 	"github.com/Sneakers-PAM/sneakers-audit/internal/telemetry"
 	otelapi "go.opentelemetry.io/otel"
 	collogspb "go.opentelemetry.io/proto/otlp/collector/logs/v1"
+	colmetricpb "go.opentelemetry.io/proto/otlp/collector/metrics/v1"
+	coltracepb "go.opentelemetry.io/proto/otlp/collector/trace/v1"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 )
 
@@ -43,6 +52,71 @@ type collector struct {
 	reject bool
 	mu     sync.Mutex
 	reqs   []*collogspb.ExportLogsServiceRequest
+	spans  []*coltracepb.ExportTraceServiceRequest
+	points []*colmetricpb.ExportMetricsServiceRequest
+}
+
+type traceCollector struct {
+	coltracepb.UnimplementedTraceServiceServer
+	c *collector
+}
+
+func (t traceCollector) Export(_ context.Context, req *coltracepb.ExportTraceServiceRequest) (*coltracepb.ExportTraceServiceResponse, error) {
+	if t.c.reject {
+		return nil, status.Error(codes.PermissionDenied, "refused")
+	}
+	t.c.mu.Lock()
+	defer t.c.mu.Unlock()
+	t.c.spans = append(t.c.spans, req)
+	return &coltracepb.ExportTraceServiceResponse{}, nil
+}
+
+type metricCollector struct {
+	colmetricpb.UnimplementedMetricsServiceServer
+	c *collector
+}
+
+func (m metricCollector) Export(_ context.Context, req *colmetricpb.ExportMetricsServiceRequest) (*colmetricpb.ExportMetricsServiceResponse, error) {
+	if m.c.reject {
+		return nil, status.Error(codes.PermissionDenied, "refused")
+	}
+	m.c.mu.Lock()
+	defer m.c.mu.Unlock()
+	m.c.points = append(m.c.points, req)
+	return &colmetricpb.ExportMetricsServiceResponse{}, nil
+}
+
+// everything is all three signals as text, for canary checks.
+func (c *collector) everything() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	var b strings.Builder
+	for _, r := range c.reqs {
+		b.WriteString(r.String())
+	}
+	for _, r := range c.spans {
+		b.WriteString(r.String())
+	}
+	for _, r := range c.points {
+		b.WriteString(r.String())
+	}
+	return b.String()
+}
+
+func (c *collector) spanNames() []string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	var names []string
+	for _, r := range c.spans {
+		for _, rs := range r.GetResourceSpans() {
+			for _, ss := range rs.GetScopeSpans() {
+				for _, s := range ss.GetSpans() {
+					names = append(names, s.GetName())
+				}
+			}
+		}
+	}
+	return names
 }
 
 func (c *collector) Export(_ context.Context, req *collogspb.ExportLogsServiceRequest) (*collogspb.ExportLogsServiceResponse, error) {
@@ -73,6 +147,8 @@ func startCollector(t *testing.T, c *collector) string {
 	}
 	srv := grpc.NewServer()
 	collogspb.RegisterLogsServiceServer(srv, c)
+	coltracepb.RegisterTraceServiceServer(srv, traceCollector{c: c})
+	colmetricpb.RegisterMetricsServiceServer(srv, metricCollector{c: c})
 	go func() { _ = srv.Serve(lis) }()
 	t.Cleanup(srv.Stop)
 	return "http://" + lis.Addr().String()
@@ -244,18 +320,161 @@ func TestFailingCollectorDegradesAndStaysReady(t *testing.T) {
 	t.Fatalf("never degraded: %+v", checker.Report(ctx))
 }
 
-func TestExportErrorsLeaveOutEndpointAndHeaders(t *testing.T) {
+// stubAudit stands in for the real handler, so a panic or an error can carry
+// the audit entry it was given.
+type stubAudit struct {
+	auditv1.UnimplementedAuditServiceServer
+}
+
+func (stubAudit) RecordEvent(_ context.Context, req *auditv1.RecordEventRequest) (*auditv1.RecordEventResponse, error) {
+	if req.GetAction() == "panic" {
+		panic(fmt.Errorf("entry %s", req.GetSubject()))
+	}
+	return nil, status.Error(codes.InvalidArgument, req.GetSubject())
+}
+
+func freePort(t *testing.T) string {
+	t.Helper()
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = l.Close() }()
+	return strconv.Itoa(l.Addr().(*net.TCPAddr).Port)
+}
+
+// A canary on every path, sent to the service's real gRPC wiring: the panic
+// path carries an audit entry into the span, the error path into the status,
+// and the method, baggage, trace state and resource come from outside.
+func TestCanaryReachesNoSignal(t *testing.T) {
 	jsonLogs(t)
+	t.Setenv("OTEL_RESOURCE_ATTRIBUTES", "deployment.name="+canary)
+	vals := map[string]string{telemetry.EnvLogsEnabled: "true"}
+	lg := log.NewLoggerWithOptions("audit", log.WithOutput(telemetry.LogOutput(env(vals), &bytes.Buffer{})))
+
+	c := &collector{}
+	shutdown, err := otel.InitWithOptions(context.Background(), "audit", startCollector(t, c), telemetry.Options(env(vals))...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fields := otelapi.GetTextMapPropagator().Fields(); slices.Contains(fields, "baggage") {
+		t.Fatalf("propagator carries baggage: %v", fields)
+	}
+
+	port := freePort(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	stopped := make(chan error, 1)
+	go func() {
+		stopped <- server.RunWithLogger(ctx, port, lg, func(gs *grpc.Server) {
+			auditv1.RegisterAuditServiceServer(gs, stubAudit{})
+		})
+	}()
+
+	conn, err := grpc.NewClient("127.0.0.1:"+port, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = conn.Close() }()
+
+	call := metadata.AppendToOutgoingContext(context.Background(),
+		"traceparent", "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01",
+		"tracestate", "vendor="+canary,
+		"baggage", "member="+canary)
+	client := auditv1.NewAuditServiceClient(conn)
+	waitCtx, waitCancel := context.WithTimeout(call, 5*time.Second)
+	defer waitCancel()
+	for _, action := range []string{"panic", "error"} {
+		_, err := client.RecordEvent(waitCtx, &auditv1.RecordEventRequest{Action: action, Subject: canary},
+			grpc.WaitForReady(true))
+		if status.Code(err) == codes.Unavailable || err == nil {
+			t.Fatalf("%s: %v", action, err)
+		}
+	}
+	_ = conn.Invoke(waitCtx, "/sneakers.audit.v1."+canary+"/Method", &auditv1.RecordEventRequest{}, &auditv1.RecordEventResponse{})
+
+	cancel()
+	if err := <-stopped; err != nil {
+		t.Fatal(err)
+	}
+	if err := shutdown(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	got := c.everything()
+	if strings.Contains(got, canary) {
+		t.Fatalf("canary reached the collector: %s", got)
+	}
+	if strings.Contains(got, "exception") {
+		t.Fatalf("an exception event reached the collector: %s", got)
+	}
+	const method = "sneakers.audit.v1.AuditService/RecordEvent"
+	if !slices.Contains(c.spanNames(), method) {
+		t.Fatalf("no span for the real method: %v", c.spanNames())
+	}
+	for _, want := range []string{`"rpc.method"`, `"rpc.response.status_code"`, method} {
+		if !strings.Contains(got, want) {
+			t.Errorf("collector is missing %s", want)
+		}
+	}
+	for _, unwanted := range []string{"server.address", "server.port", "network.peer", "client.address", "url."} {
+		if strings.Contains(got, unwanted) {
+			t.Errorf("collector received %s", unwanted)
+		}
+	}
+}
+
+// SQL and a database error both carry the canary. Needs AUDIT_PG_DSN.
+func TestPostgresSpansLeaveNoSQL(t *testing.T) {
+	dsn := os.Getenv("AUDIT_PG_DSN")
+	if dsn == "" {
+		t.Skip("set AUDIT_PG_DSN to run the database span test")
+	}
+	c := &collector{}
+	shutdown, err := otel.InitWithOptions(context.Background(), "audit", startCollector(t, c), telemetry.Options(env(nil))...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// otelpgx records a query only under a span, as a request gives it.
+	ctx, span := otelapi.Tracer("test").Start(context.Background(), "request")
+	db, err := postgres.New(ctx, dsn, telemetry.PostgresTracing())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	var one string
+	if err := db.Querier().QueryRow(ctx, "SELECT '"+canary+"'").Scan(&one); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Querier().Exec(ctx, "SELECT 1 FROM \""+canary+"\""); err == nil {
+		t.Fatal("query on a missing table worked")
+	}
+	span.End()
+	if err := shutdown(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := c.everything(); strings.Contains(got, canary) {
+		t.Fatalf("canary reached the collector: %s", got)
+	}
+	if !slices.Contains(c.spanNames(), "query SELECT") {
+		t.Fatalf("no query span: %v", c.spanNames())
+	}
+}
+
+func TestExportErrorsPrintOnlyTheCode(t *testing.T) {
 	var out bytes.Buffer
-	telemetry.SetErrorHandler(log.NewLoggerWithOptions("audit", log.WithOutput(&out)))
-	t.Cleanup(func() { telemetry.SetErrorHandler(log.Nop()) })
+	stdlog.SetOutput(&out)
+	t.Cleanup(func() { stdlog.SetOutput(os.Stderr) })
+
+	shutdown, err := otel.InitWithOptions(context.Background(), "audit", startCollector(t, &collector{}), telemetry.Options(env(nil))...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = shutdown(context.Background()) })
 
 	otelapi.Handle(errors.New("dial collector.example.org:4317: authorization=" + canary))
 
 	if strings.Contains(out.String(), canary) || strings.Contains(out.String(), "collector.example.org") {
 		t.Fatalf("export error leaked: %s", out.String())
-	}
-	if !strings.Contains(out.String(), `"error_class":"error"`) {
-		t.Fatalf("export error not logged: %s", out.String())
 	}
 }
