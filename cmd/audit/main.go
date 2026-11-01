@@ -15,6 +15,7 @@ import (
 	"github.com/Sneakers-PAM/sneakers-audit/internal/config"
 	"github.com/Sneakers-PAM/sneakers-audit/internal/grpcsvc"
 	"github.com/Sneakers-PAM/sneakers-audit/internal/server"
+	"github.com/Sneakers-PAM/sneakers-audit/internal/telemetry"
 	"google.golang.org/grpc"
 )
 
@@ -24,36 +25,35 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	logger := log.New(serviceName)
+	logger := log.NewLoggerWithOptions(serviceName, log.WithOutput(telemetry.LogOutput(os.Getenv, os.Stdout)))
 	cfg, err := config.Load()
 	if err != nil {
-		logger.Fatal().Err(err).Msg("config")
+		logger.Fatal(err, "config")
 	}
 
-	otelShutdown, err := otel.Init(ctx, serviceName, cfg.OTLPEndpoint)
+	otelShutdown, err := otel.InitWithOptions(ctx, serviceName, cfg.OTLPEndpoint, telemetry.Options(os.Getenv)...)
 	if err != nil {
-		logger.Fatal().Err(err).Msg("otel init")
+		logger.Fatal(err, "otel init")
 	}
 	defer func() {
 		if err := otelShutdown(context.Background()); err != nil {
-			logger.Warn().Err(err).Msg("otel shutdown")
+			logger.Warn("otel shutdown", log.F("error", err.Error()))
 		}
 	}()
 
 	// Service-to-service authentication fails closed: check it before anything
 	// else so a missing issuer stops the boot with the schema untouched.
 	if _, _, err := server.WorkloadConfigFromEnv(os.Getenv); err != nil {
-		logger.Fatal().Err(err).Msg("workload auth config")
+		logger.Fatal(err, "workload auth config")
 	}
 
-	svcLog := log.NewLogger(serviceName)
 	// The port answers health from here on, while the boot waits for
 	// Postgres and runs the migrations: liveness SERVING, so the startup probe
 	// passes on a slow boot, and readiness NOT_SERVING with postgres listed
 	// down until it is reached.
-	boot, err := server.StartBootHealth(cfg.GRPCPort, svcLog, "postgres")
+	boot, err := server.StartBootHealth(cfg.GRPCPort, logger, "postgres")
 	if err != nil {
-		logger.Fatal().Err(err).Msg("boot health")
+		logger.Fatal(err, "boot health")
 	}
 
 	migrationsDir := os.Getenv("MIGRATIONS_DIR")
@@ -72,10 +72,10 @@ func main() {
 	if err != nil {
 		if ctx.Err() != nil {
 			boot.Stop()
-			logger.Info().Msg("stopped while waiting for postgres")
+			logger.Info("stopped while waiting for postgres")
 			return
 		}
-		logger.Fatal().Err(err).Msg("postgres")
+		logger.Fatal(err, "postgres")
 	}
 	defer db.Close()
 
@@ -84,11 +84,11 @@ func main() {
 	svc := grpcsvc.NewPG(db.Querier())
 	// Every caller is authenticated by its workload identity and checked
 	// against grpcsvc.CallerPolicy.
-	workloadVerifier, authOpts, err := server.WorkloadAuth(ctx, os.Getenv, grpcsvc.CallerPolicy(), svcLog)
+	workloadVerifier, authOpts, err := server.WorkloadAuth(ctx, os.Getenv, grpcsvc.CallerPolicy(), logger)
 	if err != nil {
-		logger.Fatal().Err(err).Msg("workload auth")
+		logger.Fatal(err, "workload auth")
 	}
-	logger.Info().Str("port", cfg.GRPCPort).Msg("starting")
+	logger.Info("starting", log.F("port", cfg.GRPCPort))
 	// Readiness follows Postgres: every RPC reads or writes the trail there.
 	// The workload-identity verifier is required too once authentication is
 	// on: no caller can be checked before its key set loads. It's left out
@@ -97,14 +97,15 @@ func main() {
 	if workloadVerifier != nil {
 		deps = append(deps, server.WorkloadIdentity(workloadVerifier))
 	}
-	checker, err := server.NewChecker(svcLog, deps)
+	deps = append(deps, telemetry.Dependencies(cfg.OTLPEndpoint, os.Getenv)...)
+	checker, err := server.NewChecker(logger, deps)
 	if err != nil {
-		logger.Fatal().Err(err).Msg("health checker")
+		logger.Fatal(err, "health checker")
 	}
 	boot.Stop()
-	if err := server.RunWithHealth(ctx, cfg.GRPCPort, svcLog, checker, func(gs *grpc.Server) {
+	if err := server.RunWithHealth(ctx, cfg.GRPCPort, logger, checker, func(gs *grpc.Server) {
 		grpcsvc.RegisterServer(gs, svc)
 	}, authOpts...); err != nil {
-		logger.Fatal().Err(err).Msg("server exited")
+		logger.Fatal(err, "server exited")
 	}
 }
