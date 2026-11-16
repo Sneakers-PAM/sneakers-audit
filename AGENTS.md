@@ -18,6 +18,9 @@ change to the canonical form or the hash breaks `VerifyChain` for every stored t
 - Service-to-service authentication comes from `github.com/Bugs5382/go-workload-identity`;
   `internal/server/workloadauth.go` sets the Sneakers audience and caller-name prefix and builds
   the interceptors. The allow-list is `internal/grpcsvc/callers.go`; a new RPC needs an entry there.
+- Mutual TLS is `github.com/Bugs5382/go-mtls`, enabled by `MTLS_CERT_FILE`/`MTLS_KEY_FILE`/`MTLS_CA_FILE`
+  (`internal/server/mtls.go`); the plain health-only port is `HEALTH_PORT`
+  (`server.RunWithHealthPort`). See `docs/configuration.md`.
 - `internal/config/`, `internal/server/` - the env loader and the gRPC server bootstrap, with the
   health service and readiness checks from `github.com/Bugs5382/go-buildinfo`.
 - `proto/` - the API; `gen/go/` - the generated Go (committed, checked current in CI).

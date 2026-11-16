@@ -5,12 +5,14 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/signal"
 	"syscall"
 
 	"github.com/Bugs5382/go-buildinfo/health"
 	log "github.com/Bugs5382/go-log"
+	mtls "github.com/Bugs5382/go-mtls"
 	otel "github.com/Bugs5382/go-otel"
 	"github.com/Sneakers-PAM/sneakers-audit/internal/config"
 	"github.com/Sneakers-PAM/sneakers-audit/internal/grpcsvc"
@@ -47,11 +49,20 @@ func main() {
 		logger.Fatal(err, "workload auth config")
 	}
 
+	// Mutual TLS is on when the MTLS_* file variables are set: the gRPC port
+	// then requires a client certificate and health moves to its own plain
+	// port (HEALTH_PORT), because the kubelet probe cannot present one. Unset
+	// keeps plaintext on GRPC_PORT.
+	tlsProvider, bootPort, healthPort, err := setupMTLS(cfg, logger)
+	if err != nil {
+		logger.Fatal(err, "mtls config")
+	}
+
 	// The port answers health from here on, while the boot waits for
 	// Postgres and runs the migrations: liveness SERVING, so the startup probe
 	// passes on a slow boot, and readiness NOT_SERVING with postgres listed
 	// down until it is reached.
-	boot, err := server.StartBootHealth(cfg.GRPCPort, logger, "postgres")
+	boot, err := server.StartBootHealth(bootPort, logger, "postgres")
 	if err != nil {
 		logger.Fatal(err, "boot health")
 	}
@@ -88,7 +99,8 @@ func main() {
 	if err != nil {
 		logger.Fatal(err, "workload auth")
 	}
-	logger.Info("starting", log.F("port", cfg.GRPCPort))
+	authOpts = withMTLS(authOpts, tlsProvider)
+	logger.Info("starting", log.F("port", cfg.GRPCPort), log.F("health_port", healthPort), log.F("mtls", tlsProvider != nil))
 	// Readiness follows Postgres: every RPC reads or writes the trail there.
 	// The workload-identity verifier is required too once authentication is
 	// on: no caller can be checked before its key set loads. It's left out
@@ -103,9 +115,43 @@ func main() {
 		logger.Fatal(err, "health checker")
 	}
 	boot.Stop()
-	if err := server.RunWithHealth(ctx, cfg.GRPCPort, logger, checker, func(gs *grpc.Server) {
+	if err := server.RunWithHealthPort(ctx, cfg.GRPCPort, healthPort, logger, checker, func(gs *grpc.Server) {
 		grpcsvc.RegisterServer(gs, svc)
 	}, authOpts...); err != nil {
 		logger.Fatal(err, "server exited")
 	}
+}
+
+// setupMTLS loads the mTLS provider (nil when the MTLS_* variables are unset)
+// and the health ports that go with it.
+func setupMTLS(cfg config.Config, lg log.Logger) (*mtls.Provider, string, string, error) {
+	p, err := server.MTLSFromEnv(os.Getenv, lg)
+	if err != nil {
+		return nil, "", "", err
+	}
+	boot, healthPort, err := healthPorts(cfg, p != nil)
+	return p, boot, healthPort, err
+}
+
+// withMTLS adds the provider's server credentials to opts; a nil provider
+// leaves them plaintext.
+func withMTLS(opts []grpc.ServerOption, p *mtls.Provider) []grpc.ServerOption {
+	if p == nil {
+		return opts
+	}
+	return append(opts, p.ServerOption())
+}
+
+// healthPorts picks the port the boot health listens on and the plain
+// health-only port for the running server. Without mTLS health stays on the
+// gRPC port and there is no second port; with it, health moves to HEALTH_PORT
+// for the whole run, so the probes never need a client certificate.
+func healthPorts(cfg config.Config, mtlsOn bool) (bootPort, healthPort string, err error) {
+	if !mtlsOn {
+		return cfg.GRPCPort, "", nil
+	}
+	if cfg.HealthPort == cfg.GRPCPort {
+		return "", "", fmt.Errorf("HEALTH_PORT and GRPC_PORT are both %s", cfg.HealthPort)
+	}
+	return cfg.HealthPort, cfg.HealthPort, nil
 }

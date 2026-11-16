@@ -33,3 +33,18 @@ func TestLoadMissingRequired(t *testing.T) {
 		t.Fatal("expected error for missing DATABASE_DSN")
 	}
 }
+
+func TestLoadHealthPort(t *testing.T) {
+	t.Setenv("DATABASE_DSN", "postgres://x")
+	c, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.HealthPort != "9091" {
+		t.Fatalf("default HealthPort got %q, want 9091", c.HealthPort)
+	}
+	t.Setenv("HEALTH_PORT", "9191")
+	if c, err = Load(); err != nil || c.HealthPort != "9191" {
+		t.Fatalf("HealthPort = %q, %v", c.HealthPort, err)
+	}
+}
