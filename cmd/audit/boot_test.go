@@ -17,6 +17,7 @@ import (
 
 	log "github.com/Bugs5382/go-log"
 	postgres "github.com/Bugs5382/go-postgres"
+	"github.com/Sneakers-PAM/sneakers-audit/internal/config"
 	"github.com/Sneakers-PAM/sneakers-audit/internal/server"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -158,5 +159,19 @@ func TestOpenPostgres_PermanentErrorStopsTheBoot(t *testing.T) {
 	}
 	if errors.Is(err, context.Canceled) {
 		t.Fatalf("unexpected cancel: %v", err)
+	}
+}
+
+func TestHealthPorts(t *testing.T) {
+	cfg := config.Config{GRPCPort: "9090", HealthPort: "9091"}
+	if b, h, err := healthPorts(cfg, false); err != nil || b != "9090" || h != "" {
+		t.Fatalf("plaintext = %q, %q, %v; want health on the gRPC port, no second port", b, h, err)
+	}
+	if b, h, err := healthPorts(cfg, true); err != nil || b != "9091" || h != "9091" {
+		t.Fatalf("mtls = %q, %q, %v; want boot and run health on HEALTH_PORT", b, h, err)
+	}
+	cfg.HealthPort = "9090"
+	if _, _, err := healthPorts(cfg, true); err == nil {
+		t.Fatal("equal ports must fail with mtls on")
 	}
 }

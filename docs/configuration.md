@@ -8,11 +8,31 @@ The service reads its configuration from the environment.
 | `MIGRATE_DSN` | `DATABASE_DSN` | Connection string for running migrations. Set it when the runtime DSN goes through a transaction-pooling proxy: migrations need a direct session (advisory locks, prepared statements). |
 | `MIGRATIONS_DIR` | `migrations` | Directory holding the migration files. The container image sets `/migrations`. |
 | `GRPC_PORT` | `9090` | TCP port the gRPC server listens on (all interfaces). |
+| `HEALTH_PORT` | `9091` | Plaintext, health-only gRPC port, served only when mutual TLS is on (see [Mutual TLS](#mutual-tls)). Must differ from `GRPC_PORT`. |
+| `MTLS_CERT_FILE`, `MTLS_KEY_FILE`, `MTLS_CA_FILE` | (unset) | The service's certificate, its key and the cluster CA, as PEM files. All three unset keeps plaintext gRPC. See [Mutual TLS](#mutual-tls). |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | (none) | OTLP gRPC collector for traces and metrics, as a URL: `http://collector:4317` for plaintext, `https://collector:4317` for TLS. A bare `host:port` still connects as plaintext, but the OpenTelemetry SDK, which reads this variable too, logs `parse url` errors at start. Any other scheme stops the service at start. Unset or empty runs without a collector: no export, no error log. |
 | `OTLP_INSECURE_SKIP_VERIFY` | (unset) | `true` turns off the collector's certificate check on an `https` endpoint. The connection stays encrypted but the collector isn't authenticated, so logs stay off while it's on; traces and metrics keep flowing. Any other value is off. |
 | `OTLP_LOGS_ENABLED` | (unset) | `true` also exports logs to the collector, on the same endpoint. Any other value is off. Stdout doesn't change. See [Log export](#log-export). |
 | `LOG_LEVEL` | `info` | `trace`, `debug`, `info`, `warn`, `error`, `fatal`, `panic` or `disabled`. |
 | `LOG_FORMAT` | `json` | `json`, `console` (or `pretty`), or `both` (JSON on stdout, console on stderr). |
+
+## Mutual TLS
+
+Set the three `MTLS_*` file variables (from `github.com/Bugs5382/go-mtls`) and the gRPC port requires TLS 1.3
+and a client certificate signed by the CA file; a plaintext caller, a caller with no certificate or one from
+another CA is refused in the handshake. The files are re-read when they change, so a renewed certificate
+needs no restart. A certificate grants no access by itself: the workload-token check and the caller
+allow-list still run on every RPC.
+
+The kubelet's gRPC probe cannot present a client certificate, so with mutual TLS on the service also
+listens on `HEALTH_PORT`, in plaintext, and serves only the health service there (with the same readiness
+report and build headers): no reflection and no `AuditService`. The probes point at that port. During the
+boot, while Postgres is awaited and migrations run, `HEALTH_PORT` answers the boot health instead of
+`GRPC_PORT`. The health service on `GRPC_PORT` stays as it was.
+
+Setting only some of the three variables, or naming a file that cannot be read, stops the service at start
+rather than serving plaintext. With none set nothing changes: one plaintext port, `GRPC_PORT`. The service
+makes no outbound mutual-TLS calls.
 
 ## Log export
 
@@ -84,6 +104,11 @@ Example:
 DATABASE_DSN='postgres://audit@db.example.org:5432/audit?sslmode=require'
 PGPASSWORD=...   # from your secret store
 GRPC_PORT=9090
+# Mutual TLS (all three, or none):
+# MTLS_CERT_FILE=/etc/sneakers/tls/tls.crt
+# MTLS_KEY_FILE=/etc/sneakers/tls/tls.key
+# MTLS_CA_FILE=/etc/sneakers/tls/ca.crt
+# HEALTH_PORT=9091
 OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector.example.org:4317
 WORKLOAD_OIDC_ISSUER=https://kubernetes.default.svc.cluster.local
 WORKLOAD_OIDC_CA_FILE=/var/run/secrets/tokens/ca.crt

@@ -12,6 +12,7 @@ import (
 	"net"
 	"time"
 
+	"github.com/Bugs5382/go-buildinfo/grpcbuildinfo"
 	"github.com/Bugs5382/go-buildinfo/health"
 	log "github.com/Bugs5382/go-log"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
@@ -46,6 +47,16 @@ func RunWithLogger(ctx context.Context, port string, lg log.Logger, register fun
 // check's service "" answers NOT_SERVING while a required dependency is down.
 // Service "liveness" always answers SERVING. A nil checker is always ready.
 func RunWithHealth(ctx context.Context, port string, lg log.Logger, checker *health.Checker, register func(*grpc.Server), opts ...grpc.ServerOption) error {
+	return RunWithHealthPort(ctx, port, "", lg, checker, register, opts...)
+}
+
+// RunWithHealthPort is RunWithHealth plus, when healthPort is not empty, a
+// second plaintext listener that serves only the health service (and the
+// build-info and readiness headers), with no reflection, no caller services
+// and no authentication. It exists for mTLS: the main port then requires a
+// client certificate, which the kubelet's gRPC probe cannot present. The
+// health service on the main port stays as it was.
+func RunWithHealthPort(ctx context.Context, port, healthPort string, lg log.Logger, checker *health.Checker, register func(*grpc.Server), opts ...grpc.ServerOption) error {
 	hs, bi, err := newHealth(checker)
 	if err != nil {
 		return fmt.Errorf("health: %w", err)
@@ -53,6 +64,14 @@ func RunWithHealth(ctx context.Context, port string, lg log.Logger, checker *hea
 	lis, err := net.Listen("tcp", ":"+port)
 	if err != nil {
 		return fmt.Errorf("listen: %w", err)
+	}
+
+	var hlis net.Listener
+	if healthPort != "" {
+		if hlis, err = net.Listen("tcp", ":"+healthPort); err != nil {
+			_ = lis.Close()
+			return fmt.Errorf("health listen: %w", err)
+		}
 	}
 
 	// Build the default ServerOptions, prepended before caller-supplied opts.
@@ -87,6 +106,8 @@ func RunWithHealth(ctx context.Context, port string, lg log.Logger, checker *hea
 		register(s)
 	}
 
+	hsrv := serveHealthOnly(hlis, hs, bi, checker, lg)
+
 	biCtx, stopBI := context.WithCancel(ctx)
 	defer stopBI()
 	go bi.Run(biCtx)
@@ -108,6 +129,9 @@ func RunWithHealth(ctx context.Context, port string, lg log.Logger, checker *hea
 		hs.Shutdown()
 		stopped := make(chan struct{})
 		go func() {
+			if hsrv != nil {
+				hsrv.GracefulStop()
+			}
 			s.GracefulStop()
 			close(stopped)
 		}()
@@ -115,10 +139,38 @@ func RunWithHealth(ctx context.Context, port string, lg log.Logger, checker *hea
 		case <-stopped:
 		case <-time.After(gracefulStopTimeout):
 			s.Stop()
+			if hsrv != nil {
+				hsrv.Stop()
+			}
 		}
 		<-errCh
 		return nil
 	case err := <-errCh:
+		if hsrv != nil {
+			hsrv.Stop()
+		}
 		return err
 	}
+}
+
+// serveHealthOnly serves the health service on lis in plaintext and returns
+// the server; a nil lis serves nothing and returns nil. It carries the same
+// recovery, build-info and readiness interceptors as the main server and the
+// same health state; nothing else is registered.
+func serveHealthOnly(lis net.Listener, hs healthpb.HealthServer, bi *grpcbuildinfo.Server, checker *health.Checker, lg log.Logger) *grpc.Server {
+	if lis == nil {
+		return nil
+	}
+	srv := grpc.NewServer(
+		grpc.ChainUnaryInterceptor(RecoveryUnaryInterceptor(lg), bi.UnaryServerInterceptor(), reportUnaryInterceptor(checker)),
+		grpc.ChainStreamInterceptor(RecoveryStreamInterceptor(lg), bi.StreamServerInterceptor()),
+	)
+	healthpb.RegisterHealthServer(srv, hs)
+	lg.Info("plain health port serving", log.F("addr", lis.Addr().String()))
+	go func() {
+		if err := srv.Serve(lis); err != nil {
+			lg.Warn("health port stopped", log.F("error", err.Error()))
+		}
+	}()
+	return srv
 }
