@@ -123,11 +123,21 @@ func (p *pgStore) Last(ctx context.Context) (*auditv1.AuditRecord, error) {
 	return rec, nil
 }
 
-func (p *pgStore) Append(ctx context.Context, rec *auditv1.AuditRecord) error {
-	attrs, _ := json.Marshal(rec.GetAttributes())
-	if len(attrs) == 0 {
-		attrs = []byte("{}")
+// attributesJSON is the attributes column's value for a record's attributes.
+// json.Marshal of a nil map is null, so no attributes are written as {}.
+func attributesJSON(m map[string]string) []byte {
+	if len(m) == 0 {
+		return []byte("{}")
 	}
+	attrs, err := json.Marshal(m)
+	if err != nil {
+		return []byte("{}")
+	}
+	return attrs
+}
+
+func (p *pgStore) Append(ctx context.Context, rec *auditv1.AuditRecord) error {
+	attrs := attributesJSON(rec.GetAttributes())
 	_, err := p.db.Exec(ctx,
 		`INSERT INTO audit_records (`+selectCols+`) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
 		rec.GetSeq(), int32(rec.GetTier()), rec.GetAction(), rec.GetActorUserId(), rec.GetSubject(),
